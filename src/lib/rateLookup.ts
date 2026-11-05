@@ -222,9 +222,10 @@ export function getCIRate(age: number, term: number, gender: 'Male' | 'Female', 
     return 1.0; // Fail-safe default
   }
 
-  // Critical Protection cover runs to age 65 (Rider Brochure).
-  // Clamp term between 1 and min(20, 65 - targetAge)
-  const maxTerm = Math.min(20, 65 - targetAge);
+  // Official CP rate chart (supplied Nov 2026, verified cell-by-cell):
+  // ages 18-60, terms 1-20, printed boundary age + term <= 70.
+  // Clamp term between 1 and min(20, 70 - targetAge)
+  const maxTerm = Math.min(20, 70 - targetAge);
   const targetTerm = Math.max(1, Math.min(maxTerm, term));
 
   const val = row[targetTerm - 1];

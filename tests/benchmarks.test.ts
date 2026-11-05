@@ -100,3 +100,24 @@ test('SSPE certificate worked example factors (term 10)', () => {
   assert.equal(rows[2].surrenderValue, 307800); // 616 x 500 - 200
   assert.equal(rows[3].surrenderValue, 322300); // 645 x 500 - 200
 });
+
+test('CP (Critical Protection) rates match the official rate chart (Nov 2026)', async () => {
+  const { getCIRate } = await import('../src/lib/rateLookup');
+  // Anchor cells read directly from rate_chart.xlsx (CP - Classic / CP - Standard).
+  assert.equal(getCIRate(18, 1, 'Male', 'Classic'), 0.67);
+  assert.equal(getCIRate(18, 20, 'Male', 'Classic'), 1.12);
+  assert.equal(getCIRate(30, 15, 'Male', 'Classic'), 2.03);
+  assert.equal(getCIRate(50, 20, 'Male', 'Classic'), 10.29); // chart boundary age+term = 70
+  assert.equal(getCIRate(60, 10, 'Male', 'Classic'), 15.44); // last chart row/column block
+  assert.equal(getCIRate(18, 1, 'Female', 'Classic'), 0.57);
+  assert.equal(getCIRate(25, 10, 'Female', 'Classic'), 1.27);
+  assert.equal(getCIRate(18, 1, 'Male', 'Standard'), 0.74);
+  assert.equal(getCIRate(40, 20, 'Male', 'Standard'), 5.43);
+  assert.equal(getCIRate(18, 1, 'Female', 'Standard'), 0.63);
+  assert.equal(getCIRate(35, 12, 'Female', 'Standard'), 2.82);
+});
+
+test('SCEP 2% age 36 term 12 rate is 80.51 (certificate + official rate chart)', async () => {
+  const { SCEP_2_ANNUAL_RATES } = await import('../src/data/rates');
+  assert.equal(SCEP_2_ANNUAL_RATES[36][12], 80.51);
+});
