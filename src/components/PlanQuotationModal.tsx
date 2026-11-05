@@ -960,7 +960,7 @@ export default function PlanQuotationModal({
                 {/* Coverage & Benefit Highlights */}
                 <div className="space-y-3">
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-200 pb-2">
-                    2. Comprehensive Coverage & Guaranteed Benefits
+                    2. Comprehensive Coverage & Benefits
                   </h3>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1248,13 +1248,26 @@ export default function PlanQuotationModal({
             {/* Disclaimer & Footer on Page 1 for Combo & SDPP Illustration */}
             {(isComboEnabled || isSDPP) && (
               <>
+                {/* Good to know before you decide */}
+                <div className="bg-[#f7f8ef] border border-brand-primary/30 rounded-xl p-4 space-y-2 text-[10px] text-slate-700 leading-relaxed mt-6">
+                  <h4 className="font-bold uppercase tracking-wider text-slate-900 text-[11px]">Good to know before you decide</h4>
+                  <ul className="list-disc list-inside space-y-1.5 font-medium">
+                    <li>You get <strong>31 days of grace</strong> to pay a due premium. If premiums stop after at least 2 years, most plans let you keep a reduced <strong>paid-up</strong> cover instead of surrendering.</li>
+                    <li>If you <strong>surrender early</strong>, the amount you receive (see the year-by-year values) is in the early years <strong>less than the premiums you have paid</strong>. For stage-paying plans the value also falls just after a stage payment, because that money has already been paid to you.</li>
+                    <li>Where the plan allows, you may take a <strong>policy loan of up to 80% of the surrender value</strong> from the 4th policy year; interest applies as set by the company from time to time.</li>
+                    <li><strong>ETI</strong> (where available) uses part of your surrender value to keep the <strong>full death cover until the original maturity date</strong> and returns the rest in cash. It is protection only - if you survive to maturity, nothing further is payable under ETI.</li>
+                    <li>Any <strong>income-tax rebate</strong> depends on your income, the approved investment limit and the NBR rules in force, which can change. No tax saving is guaranteed by this illustration.</li>
+                    <li>Keep your <strong>nominee</strong> information updated - benefits on death are paid to your nominee. Questions? Call the Shanta Life hotline <strong>16758</strong>.</li>
+                  </ul>
+                </div>
+
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-[10px] text-slate-600 leading-relaxed mt-6">
                   <h4 className="font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5 text-[11px]">
                     <Scale className="w-3.5 h-3.5 text-slate-700" /> Important Disclaimer & Notes
                   </h4>
                   <ul className="list-disc list-inside space-y-1 font-medium">
                     <li><strong>Unofficial Sample Document:</strong> This illustration is not an official document. It is prepared solely for educational, training, and sales pitching purposes for better understanding.</li>
-                    <li><strong>Indicative Calculations:</strong> Premium amounts, maturity values, surrender values, and benefit figures are estimated projections and may contain slight variations or minor calculation discrepancies.</li>
+                    <li><strong>Indicative Calculations:</strong> Premium amounts, maturity values, surrender values, and benefit figures are calculated from the current actuarial certificate tables. If any figure differs from your issued policy document, the policy document will prevail.</li>
                     <li><strong>Official Verification:</strong> Final policy issuance, actual premium rates, and coverage terms will strictly be determined according to the official Shanta Life Insurance website calculator and company underwriting policies.</li>
                     <li><strong>Tax Rebates:</strong> Tax benefits and rebates are subject to the Income Tax Act of Bangladesh and applicable National Board of Revenue (NBR) rules.</li>
                   </ul>
@@ -1354,6 +1367,19 @@ export default function PlanQuotationModal({
                 </div>
               )}
 
+            {/* Good to know before you decide */}
+            <div className="bg-[#f7f8ef] border border-brand-primary/30 rounded-xl p-4 space-y-2 text-[10px] text-slate-700 leading-relaxed">
+              <h4 className="font-bold uppercase tracking-wider text-slate-900 text-[11px]">Good to know before you decide</h4>
+              <ul className="list-disc list-inside space-y-1.5 font-medium">
+                <li>You get <strong>31 days of grace</strong> to pay a due premium. If premiums stop after at least 2 years, most plans let you keep a reduced <strong>paid-up</strong> cover instead of surrendering.</li>
+                <li>If you <strong>surrender early</strong>, the amount you receive (see the year-by-year values) is in the early years <strong>less than the premiums you have paid</strong>. For stage-paying plans the value also falls just after a stage payment, because that money has already been paid to you.</li>
+                <li>Where the plan allows, you may take a <strong>policy loan of up to 80% of the surrender value</strong> from the 4th policy year; interest applies as set by the company from time to time.</li>
+                <li><strong>ETI</strong> (where available) uses part of your surrender value to keep the <strong>full death cover until the original maturity date</strong> and returns the rest in cash. It is protection only - if you survive to maturity, nothing further is payable under ETI.</li>
+                <li>Any <strong>income-tax rebate</strong> depends on your income, the approved investment limit and the NBR rules in force, which can change. No tax saving is guaranteed by this illustration.</li>
+                <li>Keep your <strong>nominee</strong> information updated - benefits on death are paid to your nominee. Questions? Call the Shanta Life hotline <strong>16758</strong>.</li>
+              </ul>
+            </div>
+
             {/* Terms & Conditions / Regulatory Disclaimers */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-[10px] text-slate-600 leading-relaxed">
               <h4 className="font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5 text-[11px]">
@@ -1361,7 +1387,7 @@ export default function PlanQuotationModal({
               </h4>
               <ul className="list-disc list-inside space-y-1.5 font-medium">
                 <li><strong>Unofficial Sample Document:</strong> This illustration is not an official document. It is prepared solely for educational, training, and sales pitching purposes for better understanding.</li>
-                <li><strong>Indicative Calculations:</strong> Premium amounts, maturity values, surrender values, and benefit figures are estimated projections and may contain slight variations or minor calculation discrepancies.</li>
+                <li><strong>Indicative Calculations:</strong> Premium amounts, maturity values, surrender values, and benefit figures are calculated from the current actuarial certificate tables. If any figure differs from your issued policy document, the policy document will prevail.</li>
                 <li><strong>Official Verification:</strong> Final policy issuance, actual premium rates, and coverage terms will strictly be determined according to the official Shanta Life Insurance website calculator and company underwriting policies.</li>
                 <li><strong>Tax Rebates:</strong> Tax benefits and rebates are subject to the Income Tax Act of Bangladesh and applicable National Board of Revenue (NBR) rules.</li>
               </ul>

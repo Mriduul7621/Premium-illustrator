@@ -405,7 +405,7 @@ export default function TermComparisonModal({
 
               <div className="text-right space-y-0.5">
                 <span className="inline-block bg-slate-100 text-slate-800 border border-slate-300 font-bold text-[9px] uppercase px-2.5 py-0.5 rounded tracking-wider">
-                  Official Valuation
+                  Illustration
                 </span>
                 <p className="text-xs font-bold text-slate-900">Date: {todayFormatted}</p>
                 <p className="text-[10px] text-slate-500 font-medium">Ref: SLC-{Date.now().toString().slice(-6)}</p>
