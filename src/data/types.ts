@@ -112,4 +112,6 @@ export interface ProjectionRow {
   etiCoverage: number;
   etiSurplus: number;
   etiDurationStr: string;
+  /** Maximum policy loan (80% of net CSV, from 4th policy year); 0 where no loan is available. */
+  loanValue?: number;
 }

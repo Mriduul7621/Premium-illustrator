@@ -140,8 +140,8 @@ for (const scenario of ['elite', 'prime', 'signature', 'long', 'combo', 'single'
     expect(content).toContain('Important information & next steps');
     if (['elite', 'prime', 'signature'].includes(scenario)) {
       expect(pages).toHaveLength(2);
-      expect(content).toContain('6.5%');
-      expect(content).toContain('8.5%');
+      expect(content).toContain('7%');
+      expect(content).toContain('9%');
       expect(content).toContain('8% assumed rate');
     }
     if (scenario === 'elite') {

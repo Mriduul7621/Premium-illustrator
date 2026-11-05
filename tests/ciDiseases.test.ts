@@ -80,10 +80,10 @@ test('Latin names stay selectable-report safe while Bengali names carry the scri
 
 test('coverage and eligibility helpers mirror the pricing rules', () => {
   assert.equal(CI_COVERAGE_SHARE_OF_SUM_ASSURED, 0.5);
-  assert.equal(CI_COVERAGE_CAP, 3000000);
+  assert.equal(CI_COVERAGE_CAP, 1500000);
   assert.equal(CI_MINIMUM_SUM_ASSURED, 200000);
   assert.equal(ciCoverageAmount(1440000), 720000);
-  assert.equal(ciCoverageAmount(8000000), 3000000);
+  assert.equal(ciCoverageAmount(8000000), 1500000);
   assert.equal(isCiRiderEligible(199999), false);
   assert.equal(isCiRiderEligible(200000), true);
   assert.equal(Math.round(CI_MINOR_BENEFIT_SHARE * 100), 30);

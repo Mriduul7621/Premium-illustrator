@@ -120,16 +120,20 @@ export default function TermComparisonModal({
           input.paymentMethod === 'Half-yearly' ? halfYearly :
           input.paymentMethod === 'Quarterly' ? quarterly : monthly;
 
-        const totalPaid = modeAmount * currentFreqMultiplier * t;
-        const totalPaidYearly = yearly * t;
-        const totalPaidMonthly = monthly * 12 * t;
+        // CI / hospital rider premiums run only for the rider term
+        // (min of policy term, 15 years, years to age 60) - not the full term.
+        const riderYears = Math.max(0, Math.min(t, 15, 60 - input.age));
+        const riderExcessYears = t - riderYears;
+        const totalPaid = modeAmount * currentFreqMultiplier * t - riderMonthlyTotal * 12 * riderExcessYears;
+        const totalPaidYearly = yearly * t - riderMonthlyTotal * 12 * riderExcessYears;
+        const totalPaidMonthly = monthly * 12 * t - riderMonthlyTotal * 12 * riderExcessYears;
 
         const sdppSumAssured = typeof sdppRes.sumAssured === 'number' ? sdppRes.sumAssured : (sdppRes.annualPremium * t);
         const maturityVal = sdppRes.customMaturity || sdppRes.maturity7 || 0;
         const deathBenefitVal = typeof sdppRes.deathBenefit === 'number' ? sdppRes.deathBenefit : (sdppRes.annualPremium * t);
-        const accidentalVal = planName.toLowerCase().includes('prime') 
-          ? (2 * sdppSumAssured + totalPaid)
-          : (3 * sdppSumAssured);
+        // Accidental total = death benefit + embedded add-on of 2 x FA,
+        // with the add-on capped at BDT 1 crore (design document).
+        const accidentalVal = deathBenefitVal + Math.min(2 * sdppSumAssured, 10000000);
 
         return {
           term: t,
@@ -182,11 +186,18 @@ export default function TermComparisonModal({
       const totalPaidYearly = yearly * t;
       const totalPaidMonthly = monthly * 12 * t;
       const saVal = input.sumAssured;
-      // All standard policies have sum assured and maturity value same
-      const maturityVal = input.sumAssured;
+      // SSPE's maturity and natural death benefit are its premium-based
+      // maturity value, not the input amount; other plans mature at the SA.
+      const isSSPE = selectedProdId === 'sspe';
+      const maturityVal = isSSPE ? (prodResult?.maturityValue || 0) : input.sumAssured;
       const childStipendVal = isChildPlan ? input.sumAssured * childPercentage : undefined;
-      const naturalDeathVal = input.sumAssured;
-      const accidentalDeathVal = input.hasAccidentalProtection ? input.sumAssured * 2 : input.sumAssured;
+      const naturalDeathVal = isSSPE ? maturityVal : input.sumAssured;
+      // SSPE's accidental add-on is embedded: +100% of the natural benefit,
+      // add-on capped at BDT 1 crore. The optional accidental rider pays the
+      // rider SA (base SA capped at BDT 50 lakh) on top of the base cover.
+      const accidentalDeathVal = isSSPE
+        ? naturalDeathVal + Math.min(naturalDeathVal, 10000000)
+        : input.hasAccidentalProtection ? input.sumAssured + Math.min(input.sumAssured, 5000000) : input.sumAssured;
 
       return {
         term: t,
@@ -429,7 +440,7 @@ export default function TermComparisonModal({
                         Sum Assured
                       </th>
                       <th className="py-1.5 px-2 border-r border-slate-800 text-right w-[13%]">
-                        {isSDPP ? 'Maturity (6.5%-8.5%)' : 'Maturity Value'}
+                        {isSDPP ? 'Maturity (7%-9%)' : 'Maturity Value'}
                       </th>
                       <th className="py-1.5 px-2 text-center print:hidden w-16 shrink-0">Action</th>
                     </tr>

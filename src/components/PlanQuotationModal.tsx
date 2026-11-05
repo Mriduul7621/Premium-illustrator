@@ -133,7 +133,7 @@ export default function PlanQuotationModal({
   const comboSdppTotalPaid = (comboSdppDeposit || 0) * comboMultiplier * input.term;
   const combinedTotalPaid = primaryPaid + comboSdppTotalPaid;
 
-  const sdppComboMaturity = sdppComboData ? Math.round((sdppComboData.maturity7 + sdppComboData.maturity9) / 2) : 0;
+  const sdppComboMaturity = sdppComboData ? Math.round(sdppComboData.maturity7) : 0; // Lower (7%) scenario - scenarios are never averaged into a single figure.
   const sdppDeathBenefitVal = typeof sdppComboData?.deathBenefit === 'number' 
     ? sdppComboData.deathBenefit 
     : (parseFloat(String(sdppComboData?.deathBenefit || 0)) || 0);
@@ -171,7 +171,7 @@ export default function PlanQuotationModal({
 
   // Primary Plan Critical Illness
   const hasPrimaryCI = Boolean(input.hasCIClassic || input.hasCIStandard || (input.ciCoverage && input.ciCoverage > 0));
-  const primaryCiVal = hasPrimaryCI ? (input.ciCoverage || Math.min(input.sumAssured * 0.5, 3000000)) : 0;
+  const primaryCiVal = hasPrimaryCI ? (input.ciCoverage || Math.min(input.sumAssured * 0.5, 1500000)) : 0;
 
   // SDPP Critical Illness Rule:
   // "SDPP elite e in build critical illness coverage sum assured er 50%, tobe signature and prime er kono critical illness coverage nai."
@@ -179,11 +179,10 @@ export default function PlanQuotationModal({
   const sdppCiVal = isComboSdppElite ? (sdppComboData?.ciCoverage || Math.round(sdppSaVal * 0.5)) : 0;
   const totalCombinedCI = primaryCiVal + sdppCiVal;
 
-  // Tax Rebate Calculation at exact 10% (placed at the very bottom of benefits)
-  const primaryAnnualPremium = selectedProduct?.totalPremium?.['Yearly'] || 0;
-  const comboSdppAnnualDeposit = (comboSdppDeposit || 0) * comboMultiplier;
-  const primaryTaxRebate = Math.round(primaryAnnualPremium * 0.10);
-  const sdppTaxRebate = Math.round(comboSdppAnnualDeposit * 0.10);
+  // No fixed tax-rebate % exists in the product documents (rebate depends on
+  // income and NBR rules), so no rebate amount is calculated or promised.
+  const primaryTaxRebate = 0;
+  const sdppTaxRebate = 0;
   const totalTaxRebate = primaryTaxRebate + sdppTaxRebate;
 
   const handleDownloadPdf = async () => {
@@ -479,7 +478,7 @@ export default function PlanQuotationModal({
                           <div className="font-mono font-bold text-slate-900 text-right">{formatCurrency(comboSdppTotalPaid)}</div>
                         </div>
                         <div className="space-y-0.5">
-                          <div className="text-[10px] text-slate-500 font-medium">Maturity (8% Avg):</div>
+                          <div className="text-[10px] text-slate-500 font-medium">Maturity (at 7% scenario):</div>
                           <div className="font-mono font-bold text-slate-900 text-right">
                             {formatCurrency(sdppComboMaturity)}
                           </div>
@@ -995,7 +994,7 @@ export default function PlanQuotationModal({
                             <div className="bg-purple-50/50 p-2.5 rounded-lg border border-purple-100 space-y-0.5">
                               <div className="text-[11px] font-semibold text-purple-900">{input.hasCIClassic ? 'Critical Illness Classic' : input.hasCIStandard ? 'Critical Illness Standard' : 'Critical Illness Coverage'}</div>{(input.hasCIClassic || input.hasCIStandard) && onViewDiseases && <button type="button" onClick={()=>onViewDiseases(input.hasCIClassic ? 'classic' : 'standard')} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">View Diseases →</button>}
                               <div className="text-right text-sm font-black font-mono text-purple-700">
-                                Up to {formatCurrency(isSDPP ? (sdppData?.ciCoverage || 0) : (input.ciCoverage || Math.min(input.sumAssured * 0.5, 3000000)))}
+                                Up to {formatCurrency(isSDPP ? (sdppData?.ciCoverage || 0) : (input.ciCoverage || Math.min(input.sumAssured * 0.5, 1500000)))}
                               </div>
                             </div>
                           </div>

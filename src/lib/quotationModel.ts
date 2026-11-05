@@ -82,7 +82,6 @@ function sdppPolicy(input: CalculationInput, data: SDPPResult, plan: string, mod
   const benefits = [
     ['Natural death benefit', typeof data.deathBenefit === 'number' ? `${quoteMoney(data.deathBenefit)} or account value, subject to policy terms` : data.deathBenefit],
     ['Additional accidental benefit', quoteMoney(data.accidentalBenefit)],
-    ['Illustrative annual tax rebate (10% of basic premium)', quoteMoney(data.taxRebate)],
   ];
   if (data.ciCoverage > 0) benefits.push(['Critical illness coverage', quoteMoney(data.ciCoverage)]);
   if (data.hospitalCoverage > 0) benefits.push(['Hospital coverage (25 days / year)', quoteMoney(data.hospitalCoverage)]);
@@ -184,13 +183,19 @@ export function buildQuotationModel(options: QuotationOptions): QuotationModel {
     if (input.hasCIClassic) premiumRows.push(['Critical illness - Classic', quoteMoney(product.ciClassicPremium?.[mode] ?? 0)]);
     if (input.hasCIStandard) premiumRows.push(['Critical illness - Standard', quoteMoney(product.ciStandardPremium?.[mode] ?? 0)]);
     premiumRows.push(['Total payable', quoteMoney(product.totalPremium[mode])]);
-    const benefits = [['Natural death cover', quoteMoney(input.sumAssured)], ['Illustrative tax rebate (10% estimate)', quoteMoney(product.totalPremium[mode === 'Single' ? 'Single' : 'Yearly'] * 0.1)]];
+    // Natural death: SSPE pays its maturity benefit (its input amount is the
+    // premium, not a sum assured); other plans pay the sum assured.
+    const naturalDeathAmount = product.productId === 'sspe' ? (product.maturityValue ?? input.sumAssured) : input.sumAssured;
+    const benefits = [['Natural death cover', quoteMoney(naturalDeathAmount)]];
     if (input.hasAccidentalProtection) benefits.push(
-      ['Accidental death cover (total)', quoteMoney(input.sumAssured * 2)],
-      ['Accidental permanent total / partial disability', `${quoteMoney(input.sumAssured)} each, subject to limits`],
-      ['Accidental medical reimbursement', `Up to ${quoteMoney(input.sumAssured * 0.15)}`],
+      // Accidental rider pays the rider SA (base SA capped at BDT 50 lakh) on
+      // top of the base cover; medical reimbursement is 15% of the main
+      // policy amount, capped at BDT 500,000 (Rider Brochure).
+      ['Accidental death cover (total)', quoteMoney(input.sumAssured + Math.min(input.sumAssured, 5000000))],
+      ['Accidental permanent total / partial disability', `${quoteMoney(Math.min(input.sumAssured, 5000000))} each, subject to limits`],
+      ['Accidental medical reimbursement', `Up to ${quoteMoney(Math.min(input.sumAssured * 0.15, 500000))}`],
     );
-    if ((input.hasCIClassic || input.hasCIStandard) && input.sumAssured >= 200000) benefits.push(['Critical illness coverage', quoteMoney(input.ciCoverage || Math.min(input.sumAssured * 0.5, 3000000))]);
+    if ((input.hasCIClassic || input.hasCIStandard) && input.sumAssured >= 200000) benefits.push(['Critical illness coverage', quoteMoney(input.ciCoverage || ciCoverageAmount(input.sumAssured))]);
     if (product.productId.startsWith('scep')) {
       const stipend = Number(product.productId.split('_').pop()) / 100;
       benefits.push(['Monthly education stipend on covered parental death', quoteMoney(input.sumAssured * stipend)], ['Waiver of premium', 'Subject to covered event and policy terms']);
@@ -204,9 +209,9 @@ export function buildQuotationModel(options: QuotationOptions): QuotationModel {
     if (product.productId === 's4pp') maturity = [1, 2, 3].map(part => [`At year ${Math.round(input.term * part / 4)} (15%)`, quoteMoney(input.sumAssured * 0.15)]).concat([[`At maturity, year ${input.term} (55%)`, quoteMoney(input.sumAssured * 0.55)]]);
     const schedules: QuoteTable[] = [];
     if (options.projectionData?.length) schedules.push({
-      title: 'Policy value schedule', columns: ['Year', 'Base premium', 'Natural death', 'Surrender value', 'Paid-up value', 'ETI duration'],
+      title: 'Policy value schedule', columns: ['Year', 'Base premium', 'Natural death', 'Surrender value', 'Paid-up value', 'ETI cash back'],
       rows: options.projectionData.map(row => [String(row.year), quoteMoney(row.premium), quoteMoney(row.deathBenefit), quoteMoney(row.surrenderValue), quoteMoney(row.paidUpValue), row.etiDurationStr || '-']),
-      note: 'Premium is the base premium for the year, not cumulative contributions. ETI means Extended Term Insurance. Values are indicative and subject to official verification.',
+      note: 'Premium shown is cumulative base premium paid up to that year. Surrender values are net of the BDT 200 processing fee. ETI (Extended Term Insurance) cash back is what remains of the surrender value after buying the full cover to the original maturity date. Values are indicative and subject to official verification.',
     });
     const summary: QuoteTable[] = [
       { title: 'Premium breakdown', columns: ['Component', `${mode} payment`], rows: premiumRows, note: 'Amounts are rounded to BDT; totals use unrounded values.' },
@@ -217,7 +222,7 @@ export function buildQuotationModel(options: QuotationOptions): QuotationModel {
     const ciType = input.hasCIClassic ? 'classic' : input.hasCIStandard ? 'standard' : undefined;
     const ciPremium = ciType === 'classic' ? product.ciClassicPremium?.[mode] : ciType === 'standard' ? product.ciStandardPremium?.[mode] : 0;
     const criticalIllness: QuoteCriticalIllness | undefined = ciType && input.sumAssured >= 200000 && (ciPremium ?? 0) > 0
-      ? { type: ciType, coverage: input.ciCoverage || Math.min(input.sumAssured * 0.5, 3000000) }
+      ? { type: ciType, coverage: input.ciCoverage || ciCoverageAmount(input.sumAssured) }
       : undefined;
     policies.push({ criticalIllness, title: product.productName, mode, premium: product.totalPremium[mode], totalPaid: product.totalPremium[mode] * count, summary, schedules });
   }

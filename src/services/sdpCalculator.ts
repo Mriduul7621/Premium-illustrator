@@ -1,15 +1,15 @@
 import { CalculationInput, SDPPResult } from '../data/types';
 
 // Single source of truth for illustration labels and calculation assumptions.
-export const SDPP_ILLUSTRATION_RATES = { lower: 6.5, higher: 8.5, projection: 8 } as const;
+export const SDPP_ILLUSTRATION_RATES = { lower: 7, higher: 9, projection: 7 } as const;
 
 // Rate Tables & Constants for SDPP
 export const PREMIUM_CHARGE_SCALE: Record<number, Record<number, number>> = {
-  1: { 5: 0.20, 6: 0.25, 7: 0.25, 8: 0.25, 9: 0.25, 10: 0.30, 11: 0.35, 12: 0.35, 13: 0.35, 14: 0.35, 15: 0.40, 16: 0.40, 17: 0.40, 18: 0.40, 19: 0.40, 20: 0.45, 21: 0.45, 22: 0.45, 23: 0.45, 24: 0.45, 25: 0.45 },
-  2: { 5: 0.05, 6: 0.05, 7: 0.05, 8: 0.05, 9: 0.05, 10: 0.05, 11: 0.10, 12: 0.10, 13: 0.10, 14: 0.10, 15: 0.10, 16: 0.10, 17: 0.10, 18: 0.10, 19: 0.10, 20: 0.10, 21: 0.10, 22: 0.10, 23: 0.10, 24: 0.10, 25: 0.10 },
-  3: { 5: 0, 6: 0, 7: 0.05, 8: 0.05, 9: 0.05, 10: 0.05, 11: 0.05, 12: 0.05, 13: 0.10, 14: 0.10, 15: 0.10, 16: 0.10, 17: 0.10, 18: 0.10, 19: 0.10, 20: 0.10, 21: 0.10, 22: 0.10, 23: 0.10, 24: 0.10, 25: 0.10 },
-  4: { 5: 0, 6: 0, 7: 0, 8: 0.05, 9: 0.05, 10: 0.05, 11: 0.05, 12: 0.05, 13: 0.05, 14: 0.05, 15: 0.05, 16: 0.05, 17: 0.05, 18: 0.05, 19: 0.05, 20: 0.05, 21: 0.05, 22: 0.10, 23: 0.10, 24: 0.10, 25: 0.10 },
-  5: { 5: 0, 6: 0, 7: 0, 8: 0, 9: 0.05, 10: 0.05, 11: 0.05, 12: 0.05, 13: 0.05, 14: 0.05, 15: 0.05, 16: 0.05, 17: 0.05, 18: 0.05, 19: 0.05, 20: 0.05, 21: 0.05, 22: 0.05, 23: 0.05, 24: 0.05, 25: 0.05 }
+  1: { 5: 0.2, 6: 0.25, 7: 0.25, 8: 0.25, 9: 0.25, 10: 0.3, 11: 0.35, 12: 0.35, 13: 0.35, 14: 0.35, 15: 0.4, 16: 0.4, 17: 0.4, 18: 0.4, 19: 0.4, 20: 0.45, 21: 0.45, 22: 0.45, 23: 0.45, 24: 0.45, 25: 0.45 },
+  2: { 5: 0.05, 6: 0.05, 7: 0.1, 8: 0.1, 9: 0.1, 10: 0.1, 11: 0.1, 12: 0.1, 13: 0.1, 14: 0.1, 15: 0.1, 16: 0.1, 17: 0.1, 18: 0.1, 19: 0.1, 20: 0.1, 21: 0.1, 22: 0.1, 23: 0.1, 24: 0.15, 25: 0.15 },
+  3: { 5: 0, 6: 0.05, 7: 0.05, 8: 0.05, 9: 0.05, 10: 0.05, 11: 0.05, 12: 0.1, 13: 0.1, 14: 0.1, 15: 0.1, 16: 0.1, 17: 0.1, 18: 0.1, 19: 0.1, 20: 0.1, 21: 0.1, 22: 0.1, 23: 0.1, 24: 0.1, 25: 0.1 },
+  4: { 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0.05, 11: 0.05, 12: 0.05, 13: 0.05, 14: 0.05, 15: 0.05, 16: 0.05, 17: 0.1, 18: 0.1, 19: 0.1, 20: 0.1, 21: 0.1, 22: 0.1, 23: 0.1, 24: 0.1, 25: 0.1 },
+  5: { 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0.05, 12: 0.05, 13: 0.05, 14: 0.05, 15: 0.05, 16: 0.05, 17: 0.05, 18: 0.05, 19: 0.05, 20: 0.05, 21: 0.05, 22: 0.05, 23: 0.05, 24: 0.05, 25: 0.05 },
 };
 
 export const MORTALITY_TABLE: Record<number, number> = {
@@ -125,8 +125,19 @@ export const getPremiumChargeRate = (year: number, term: number): number => {
 };
 
 export const getAdminCharge = (annualPremium: number): number => {
-  return 50;
+  // Design Document Table 4: monthly admin charge banded by annual basic premium.
+  if (annualPremium <= 36000) return 40;
+  if (annualPremium <= 48000) return 50;
+  if (annualPremium <= 72000) return 60;
+  return 70;
 };
+
+// AD/APTD COI: BDT 0.00095 per BDT 1.0 of accidental coverage per year
+// (Design Document COI section). Accidental coverage = 2 x FA-equivalent,
+// capped at BDT 1 crore.
+export const AD_APTD_COI_RATE = 0.00095;
+export const getAccidentalCoverage = (annualPremium: number, term: number): number =>
+  Math.min(2 * annualPremium * term, 10000000);
 
 export const getMortalityRate = (age: number): number => {
   const availableAges = Object.keys(MORTALITY_TABLE).map(Number).sort((a, b) => a - b);
@@ -239,7 +250,7 @@ export const runSDPPCalculations = (inputs: CalculationInput): SDPPResult => {
   // Rider Premium (Constant throughout the term, not invested)
   const riderTerm = Math.max(0, Math.min(pTerm, 15, 60 - age));
   
-  const ciCoverageValue = !isPrimeOrSignature ? (Number(ciCoverage) || Math.min(0.5 * (annualPremium * pTerm), 1500000)) : 0;
+  const ciCoverageValue = !isPrimeOrSignature ? (Number(ciCoverage) || Math.min(0.5 * (annualPremium * pTerm), 3000000)) : 0;
   const ciMonthly = !isPrimeOrSignature ? (((ciCoverageValue / 1000) * getCIRate(age, riderTerm, gender)) / 12) : 0;
   const hiMonthly = (!isPrimeOrSignature && Number(dailyHospitalCoverage) >= 1000) ? ((Number(dailyHospitalCoverage) / 1000) * getHIRate(age, riderTerm)) / 12 : 0;
 
@@ -305,8 +316,9 @@ export const runSDPPCalculations = (inputs: CalculationInput): SDPPResult => {
       const balanceForNAR = av - adminCharge;
       const NAR = Math.max(0, currentSA - balanceForNAR);
       const deathBenefitCharge = NAR * mortalityRate;
+      const accidentalCharge = (getAccidentalCoverage(annualPremium, pTerm) * AD_APTD_COI_RATE) / 12;
 
-      const totalCharges = adminCharge + deathBenefitCharge;
+      const totalCharges = adminCharge + deathBenefitCharge + accidentalCharge;
 
       // 4. AV Update
       av = (av - totalCharges) * (1 + monthlyRate)
@@ -352,9 +364,12 @@ export const runSDPPCalculations = (inputs: CalculationInput): SDPPResult => {
       const allocatedPremium = premiumDeposit - premiumFee;
       const adminFee = getAdminCharge(annualPremium);
       const mortalityRate = getMortalityRate(age + year - 1) / 12;
-      const currentSA = isPrime ? Math.max(allocatedPremium, openingAV) : annualPremium * pTerm;
+      // Prime death-benefit basis is cumulative basic premiums paid to date
+      // (same definition as calculateAV), not a single month's allocation.
+      const currentSA = isPrime ? Math.max(mBasicPremium * m, openingAV) : annualPremium * pTerm;
       const NAR = Math.max(0, currentSA - (openingAV - adminFee));
-      const totalCharges = adminFee + NAR * mortalityRate;
+      const accidentalCharge = (getAccidentalCoverage(annualPremium, pTerm) * AD_APTD_COI_RATE) / 12;
+      const totalCharges = adminFee + NAR * mortalityRate + accidentalCharge;
       const netBase = openingAV - totalCharges;
       const interestEarned = netBase * qMonthlyRate + allocatedPremium * (Math.pow(qDailyRateBase, fullYearDays[monthInYear - 1]) - 1);
       projAV = Math.max(0, netBase + allocatedPremium + interestEarned);
@@ -400,7 +415,7 @@ export const runSDPPCalculations = (inputs: CalculationInput): SDPPResult => {
     maturity7: maturity7Val,
     maturity9: maturity9Val,
     customMaturity,
-    taxRebate: annualPremium * 0.10,
+    taxRebate: 0, // No document supports a fixed rebate %; rebate depends on income and NBR rules.
     surrenderValue7: pMonth > 0 ? getCSV(avAtSurrender7, pMonth) : 0,
     surrenderValue9: pMonth > 0 ? getCSV(avAtSurrender9, pMonth) : 0,
     errors,

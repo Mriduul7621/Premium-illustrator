@@ -12,7 +12,7 @@ import {
   FileText, Printer, Download, BarChart3, Scale, Menu
 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
-import { calculatePremiums, calculateSDPPResult, calculateProjection, calculateSAFromPremium } from '../services/calculator';
+import { calculatePremiums, calculateSDPPResult, calculateProjection, calculateSAFromPremium, ageNearestBirthday } from '../services/calculator';
 import { runSDPPCalculations } from '../services/sdpCalculator';
 import { CalculationInput, CalculationResult, PlanFrequency, Gender, SDPPResult, ProjectionRow, SDPPPlan } from '../data/types';
 import { CLASSIC_CI_DISEASES, MINOR_CI_DISEASES, MAJOR_CI_DISEASES, CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR, CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR, CI_MINOR_BENEFIT_SHARE, ciCoverageAmount, ciDiseaseLabel } from '../data/ciDiseases';
@@ -105,7 +105,7 @@ const PLAN_RULES: Record<string, any> = {
     maxAge: 55,
     maxMaturityAge: 65,
     terms: Array.from({ length: 11 }, (_, i) => i + 10),
-    minPremium: 300000
+    minSA: 300000 // Certificate rule: minimum SUM ASSURED (not minimum premium)
   }
 };
 
@@ -269,8 +269,8 @@ export default function Calculator() {
     try {
       const birthDate = parse(input.dob, 'yyyy-MM-dd', new Date());
       const referenceDate = input.issueDate ? parse(input.issueDate, 'yyyy-MM-dd', new Date()) : new Date();
-      // Simplified age calculation matching the website's logic (Year difference)
-      const age = referenceDate.getFullYear() - birthDate.getFullYear();
+      // Certificates price by Age Nearest Birthday (ANB), not calendar-year difference.
+      const age = ageNearestBirthday(birthDate, referenceDate);
 
       if (!isNaN(age) && age >= 0 && age < 100) {
         setInput(prev => ({ ...prev, age }));
@@ -324,13 +324,31 @@ export default function Calculator() {
         errors.term = `Total age at maturity (${age + term}) exceeds limit of ${currentRules.maxMaturityAge} years.`;
       }
 
+      // SCEP child eligibility (certificate): child 30 days-15 years at entry,
+      // and child's age at maturity must not exceed 25 years. Applied whenever
+      // a child age has been provided.
+      if (selectedProductId.startsWith('scep') && (input.childAge ?? 0) > 0 && term > 0) {
+        if ((input.childAge as number) > 15) {
+          errors.childAge = 'Child must be 15 years or younger at entry.';
+        } else if ((input.childAge as number) + term > 25) {
+          errors.childAge = `Child's age at maturity (${(input.childAge as number) + term}) exceeds the limit of 25 years.`;
+        }
+      }
+
       if (term > 0) {
         if (inputMode === 'SumAssured' && sumAssured > 0) {
           if (currentRules.minSA && sumAssured < currentRules.minSA) {
             errors.sumAssured = `Minimum Sum Assured is ${formatCurrency(currentRules.minSA)}.`;
           }
         } else if (inputMode === 'Premium' && targetPremium > 0) {
-          if (isSinglePremiumProduct && currentRules.minPremium && targetPremium < currentRules.minPremium) {
+          if (selectedProductId.startsWith('scep_single_')) {
+            // SCEP-Single minimum is on the SUM ASSURED the premium buys (Tk 3,00,000),
+            // not on the premium itself (certificate rule).
+            const derivedSA = calculateSAFromPremium(input, selectedProductId);
+            if (derivedSA > 0 && derivedSA < (currentRules.minSA || 300000)) {
+              errors.targetPremium = `This premium buys ${formatCurrency(derivedSA)} cover; the minimum Sum Assured is ${formatCurrency(currentRules.minSA || 300000)}.`;
+            }
+          } else if (isSinglePremiumProduct && currentRules.minPremium && targetPremium < currentRules.minPremium) {
             errors.targetPremium = `Minimum Single Premium is ${formatCurrency(currentRules.minPremium)}.`;
           } else if (!isSinglePremiumProduct && !isSDPP) {
             const minSAResult = calculatePremiums({ 
@@ -462,7 +480,7 @@ export default function Calculator() {
 
   const getDeathBenefits = () => {
     if (isSDPP && sdppData) {
-      const primaryCiAmt = (input.hasCIClassic || input.hasCIStandard) ? Math.min(input.sumAssured * 0.5, 3000000) : 0;
+      const primaryCiAmt = (input.hasCIClassic || input.hasCIStandard) ? ciCoverageAmount(input.sumAssured) : 0;
       const sdppCiAmt = sdppData.ciCoverage || 0;
       const totalCiAmt = primaryCiAmt + sdppCiAmt;
 
@@ -530,7 +548,9 @@ export default function Calculator() {
     return benefits;
   };
 
-  const taxRebate = (isSinglePremiumProduct ? (selectedProduct?.totalPremium.Single || 0) : (selectedProduct?.totalPremium.Yearly || 0)) * 0.10;
+  // No fixed tax-rebate % exists in the product documents (rebate depends on
+  // income and NBR rules), so no rebate amount is calculated or promised.
+  const taxRebate = 0;
 
   // SDPP Combo calculation
   const sdppComboData = useMemo(() => {
@@ -550,7 +570,34 @@ export default function Calculator() {
   }, [isComboEnabled, input, comboSdppPlan, comboSdppPaymentMethod, comboSdppDeposit, comboSdppDailyHospitalCoverage, comboSdppCustomRate]);
 
   const projectionData = useMemo(() => {
-    if (isSDPP && sdppData) return sdppData.projection;
+    if (isSDPP && sdppData) {
+      // Map SDPP account projection rows onto the standard liquidity shape.
+      // SDPP has no paid-up/ETI (non-forfeiture = cash surrender only);
+      // surrender = account value - surrender charge - Tk 200 fee;
+      // death benefit = max(account value, Face Amount) - for Prime the
+      // Face-Amount equivalent is total basic premiums paid.
+      const chargePct: Record<number, number> = { 1: 1, 2: 0.6, 3: 0.3, 4: 0.2, 5: 0.1 };
+      const faEquivalent = sdppData.annualPremium * input.term;
+      return sdppData.projection.map((row) => {
+        const pct = chargePct[row.year] || 0;
+        const surrenderValue = Math.max(0, Math.round(row.accountValue - row.accountValue * pct - 200));
+        const deathBenefit = input.sdppPlan === 'Prime'
+          ? Math.max(row.accountValue, row.premiumPaid)
+          : Math.max(row.accountValue, faEquivalent);
+        return {
+          year: row.year,
+          premium: row.premiumPaid,
+          deathBenefit,
+          surrenderValue,
+          maturityValue: row.year === input.term ? row.accountValue : 0,
+          paidUpValue: 0,
+          etiCoverage: 0,
+          etiSurplus: 0,
+          etiDurationStr: '—',
+          loanValue: row.year >= 4 ? Math.floor(surrenderValue * 0.8) : 0
+        } as ProjectionRow;
+      });
+    }
     return calculateProjection(input, selectedProductId);
   }, [input, selectedProductId, isSDPP, sdppData]);
 
@@ -1249,7 +1296,7 @@ export default function Calculator() {
                             step="0.1"
                             value={input.customInterestRate || ''}
                             onChange={(e) => handleInputChange('customInterestRate', e.target.value === '' ? undefined : Number(e.target.value))}
-                            placeholder="Optional (Default 6.5% - 8.5% Range)"
+                            placeholder="Optional (Default 7% - 9% Range)"
                             className="w-full bg-white border border-slate-200 rounded-full px-4 py-2 text-xs font-mono font-black text-slate-900 outline-none focus:border-brand-primary"
                           />
                           <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">%</span>
@@ -1601,7 +1648,7 @@ export default function Calculator() {
                     <div className="space-y-1 pt-0.5">
                       <div className="flex justify-between items-center px-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Custom Return Rate</label>
-                        <span className="text-[9px] text-slate-400 font-bold">Default Range: 6.5% - 8.5%</span>
+                        <span className="text-[9px] text-slate-400 font-bold">Default Range: 7% - 9%</span>
                       </div>
                       <div className="relative">
                         <input
@@ -1610,7 +1657,7 @@ export default function Calculator() {
                           disabled={!isComboStep2Complete}
                           value={comboSdppCustomRate}
                           onChange={(e) => setComboSdppCustomRate(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
-                          placeholder="e.g. 8.5 (Default 6.5%-8.5%)"
+                          placeholder="e.g. 9 (Default 7%-9%)"
                           className="w-full bg-white border border-slate-200 rounded-full px-4 py-2 text-xs font-mono font-bold text-slate-800 outline-none focus:border-brand-primary"
                         />
                         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 uppercase">%</span>
@@ -1714,6 +1761,15 @@ export default function Calculator() {
                     ? (plan as any).sdppData?.maturity9 
                     : (plan.maturityValue || input.sumAssured);
 
+                  // Natural death benefit is plan-specific - never a hard-coded
+                  // copy of the input SA. SSPE pays its maturity benefit; SDPP
+                  // pays max(account value, Face Amount equivalent).
+                  const naturalDeathVal = plan.productId.startsWith('sdpp_')
+                    ? Math.max(((plan as any).sdppData?.annualPremium || 0) * input.term, (plan as any).sdppData?.maturity9 || 0)
+                    : plan.productId === 'sspe'
+                      ? (plan.maturityValue || input.sumAssured)
+                      : input.sumAssured;
+
                   return (
                     <tr key={plan.productId} className={cn(
                       "group transition-colors hover:bg-white/5",
@@ -1744,7 +1800,7 @@ export default function Calculator() {
                          <p className="text-[9px] md:text-sm font-black text-slate-500 font-mono italic">{formatCurrency(maturityActionVal)}</p>
                       </td>
                       <td className="px-4 py-6 md:px-8 text-center">
-                         <p className="text-[9px] md:text-sm font-bold text-slate-400 font-mono">{formatCurrency(input.sumAssured)}</p>
+                         <p className="text-[9px] md:text-sm font-bold text-slate-400 font-mono">{formatCurrency(naturalDeathVal)}</p>
                       </td>
                       <td className="px-4 py-6 md:px-8 text-right">
                          <button 
@@ -1900,7 +1956,7 @@ export default function Calculator() {
                   <strong className="font-mono text-slate-800 whitespace-nowrap">{formatCurrency(sdppPaid)}</strong>
                 </div>
                 <div className="flex justify-between items-center gap-2">
-                  <span className="text-slate-600 font-medium">Maturity ({isCustomRate ? `${customRateVal}%` : '6.5% - 8.5%'}):</span>
+                  <span className="text-slate-600 font-medium">Maturity ({isCustomRate ? `${customRateVal}%` : '7% - 9%'}):</span>
                   <strong className="font-mono text-brand-primary text-right whitespace-nowrap">{sdppMaturityText}</strong>
                 </div>
               </div>
@@ -2041,11 +2097,11 @@ export default function Calculator() {
                <span className="text-lg font-black text-brand-text">BDT {sdppData.totalPremiumPaid.toLocaleString()}</span>
              </div>
              <div className="bg-brand-primary flex justify-between items-center p-5 rounded-2xl text-white shadow-xl shadow-brand-primary/20">
-               <span className="text-sm font-black italic">Estimated Maturity (6.5%)</span>
+               <span className="text-sm font-black italic">Estimated Maturity (7%)</span>
                <span className="text-lg font-black italic">BDT {sdppData.maturity7.toLocaleString()}</span>
              </div>
              <div className="bg-blue-900 flex justify-between items-center p-5 rounded-2xl text-white shadow-xl shadow-blue-900/20">
-               <span className="text-sm font-black italic">Estimated Maturity (8.5%)</span>
+               <span className="text-sm font-black italic">Estimated Maturity (9%)</span>
                <span className="text-lg font-black italic">BDT {sdppData.maturity9.toLocaleString()}</span>
              </div>
           </div>
@@ -2058,7 +2114,7 @@ export default function Calculator() {
       const dailyAmt = Number(input.dailyHospitalCoverage) || 0;
       const yearlyMax = sdppData.hospitalCoverage || (dailyAmt * 25);
 
-      const primaryCiAmt = (input.hasCIClassic || input.hasCIStandard) ? Math.min(input.sumAssured * 0.5, 3000000) : 0;
+      const primaryCiAmt = (input.hasCIClassic || input.hasCIStandard) ? ciCoverageAmount(input.sumAssured) : 0;
       const sdppCiAmt = sdppData.ciCoverage || 0;
       const totalCiAmt = primaryCiAmt + sdppCiAmt;
 
@@ -2198,7 +2254,7 @@ export default function Calculator() {
       const dailyHospitalCoverageAmt = comboSdppDailyHospitalCoverage || 0;
       const yearlyHospitalCoverageAmt = sdppComboData.hospitalCoverage || (dailyHospitalCoverageAmt * 25);
 
-      const primaryCiAmt = (input.hasCIClassic || input.hasCIStandard) ? Math.min(input.sumAssured * 0.5, 3000000) : 0;
+      const primaryCiAmt = (input.hasCIClassic || input.hasCIStandard) ? ciCoverageAmount(input.sumAssured) : 0;
       const sdppCiAmt = sdppComboData.ciCoverage || 0;
       const totalCiAmt = primaryCiAmt + sdppCiAmt;
 
@@ -2221,7 +2277,7 @@ export default function Calculator() {
         }>;
       }> = [
         { 
-          label: `ACCUMULATED MATURITY BENEFIT ${isCustomRate ? `(${customRateVal}%)` : '(6.5% - 8.5%)'}`,
+          label: `ACCUMULATED MATURITY BENEFIT ${isCustomRate ? `(${customRateVal}%)` : '(7% - 9%)'}`,
           displayValue: combinedMaturityValText,
           numericValue: 1, // Always show maturity
           subtitle: `Policy 1 (${formatCurrency(primaryMaturity)}) + SDPP (${sdppMaturityValText})`,
@@ -2630,7 +2686,7 @@ export default function Calculator() {
               <p className="text-xs text-slate-500 font-bold">
                 {input.customInterestRate && Number(input.customInterestRate) > 0
                   ? `Projected maturity return at ${input.term} years (${input.customInterestRate}% Custom Rate)`
-                  : `Projected maturity return at ${input.term} years (6.5% to 8.5% Return)`}
+                  : `Projected maturity return at ${input.term} years (7% to 9% Return)`}
               </p>
             </div>
             <div className="text-center md:text-right">
@@ -3026,7 +3082,7 @@ export default function Calculator() {
                          {(input.hasCIClassic || input.hasCIStandard) && (
                            <li className="flex flex-col gap-0 border-b border-brand-primary/10 pb-2 md:pb-4 last:border-0 last:pb-0">
                               <span className="text-[11px] md:text-[12px] text-slate-400 font-black uppercase tracking-widest">{input.hasCIClassic ? 'Critical Illness Classic' : 'Critical Illness Standard'}</span><button type="button" onClick={()=>setCiInfoView(input.hasCIClassic ? 'classic' : 'standard')} className="self-start mt-1 text-[12px] md:text-sm font-extrabold text-brand-primary underline underline-offset-4 hover:opacity-75" aria-label="View covered critical illness diseases">View Diseases →</button>
-                              <span className="text-[14px] md:text-xl font-black text-brand-text">{formatCurrency(Math.min(input.sumAssured * 0.5, 3000000))}</span>
+                              <span className="text-[14px] md:text-xl font-black text-brand-text">{formatCurrency(ciCoverageAmount(input.sumAssured))}</span>
                               <span className="text-[11px] md:text-[12px] text-slate-400 font-bold uppercase mt-0.5">50% SA Rider Protection</span>
                             </li>
                           )}
@@ -3040,7 +3096,7 @@ export default function Calculator() {
                           {(input.hasCIClassic || input.hasCIStandard) && isSDPP && (sdppData?.ciCoverage || 0) > 0 && (
                             <li className="flex flex-col gap-0 border-b border-brand-primary/10 pb-2 md:pb-4 last:border-0 last:pb-0">
                                <span className="text-[11px] md:text-[12px] text-brand-gold font-black uppercase tracking-widest">Total Combined Critical Protection</span>
-                               <span className="text-[14px] md:text-xl font-black text-brand-gold">{formatCurrency(Math.min(input.sumAssured * 0.5, 3000000) + (sdppData?.ciCoverage || 0))}</span>
+                               <span className="text-[14px] md:text-xl font-black text-brand-gold">{formatCurrency(ciCoverageAmount(input.sumAssured) + (sdppData?.ciCoverage || 0))}</span>
                                <span className="text-[11px] md:text-[12px] text-brand-gold/70 font-bold uppercase mt-0.5">Primary Rider + SDPP Combined Coverage</span>
                            </li>
                          )}

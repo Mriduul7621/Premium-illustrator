@@ -12,9 +12,9 @@ for (const plan of ['elite', 'signature', 'prime']) {
       assert.equal(policy.premium, options.sdppData!.totalModePremium);
       assert.equal(policy.totalPaid, options.sdppData!.totalPremiumPaid);
       const content = JSON.stringify(policy);
-      assert.match(content, /At 6\.5% crediting rate/);
-      assert.match(content, /At 8\.5% crediting rate/);
-      assert.match(content, /8% assumed rate/);
+      assert.match(content, /At 7% crediting rate/);
+      assert.match(content, /At 9% crediting rate/);
+      assert.match(content, /7% assumed rate/);
       assert.equal(policy.schedules[0].rows.length, options.input.term);
       if (plan !== 'elite') assert.doesNotMatch(content, /Critical illness coverage|Hospital coverage/);
       if (plan === 'prime') assert.match(content, /Current account value or Paid Basic premium/);

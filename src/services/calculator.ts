@@ -19,7 +19,25 @@ import { S3PP_ANNUAL_RATES, S3PP_CSV, S3PP_ETI_RATES } from '../data/s3pp_rates'
 import { ciCoverageAmount, isCiRiderEligible } from '../data/ciDiseases';
 import { getCIRate } from '../lib/rateLookup';
 
-const ACCIDENTAL_RATE = 5.57; // per 1000
+// Accidental rider (Rider Brochure): per BDT 1,000 of rider coverage,
+// age 18-55 -> Tk 5.57; age 56-60 -> Tk 6.69; rider SA max BDT 50 lakh.
+const ACCIDENTAL_RATE_YOUNG = 5.57;
+const ACCIDENTAL_RATE_OLDER = 6.69;
+const ACCIDENTAL_MAX_SA = 5000000;
+export const accidentalRateForAge = (age: number): number => {
+  if (age >= 18 && age <= 55) return ACCIDENTAL_RATE_YOUNG;
+  if (age >= 56 && age <= 60) return ACCIDENTAL_RATE_OLDER;
+  return 0;
+};
+
+/** Age Nearest Birthday (ANB) - the pricing age basis in the certificates. */
+export function ageNearestBirthday(birth: Date, reference: Date): number {
+  let years = reference.getFullYear() - birth.getFullYear();
+  let months = reference.getMonth() - birth.getMonth();
+  if (reference.getDate() < birth.getDate()) months--;
+  if (months < 0) { years--; months += 12; }
+  return years + (months >= 6 ? 1 : 0);
+}
 
 export function calculateSAFromPremium(input: CalculationInput, selectedProductId: string): number {
   const { age, term, targetPremium, paymentMethod } = input;
@@ -47,19 +65,9 @@ export function calculateSAFromPremium(input: CalculationInput, selectedProductI
     return targetPremium;
   }
 
-  // Find rate
-  const agesAvailable = Object.keys(product.rates).map(Number);
-  const targetAge = agesAvailable.reduce((prev, curr) => 
-    Math.abs(curr - age) < Math.abs(prev - age) ? curr : prev, 26);
-  const baseRatesForAge = product.rates[targetAge];
-  
-  let baseRate = 0;
-  if (baseRatesForAge) {
-    const termsAvailable = Object.keys(baseRatesForAge).map(Number);
-    const nearestTerm = termsAvailable.reduce((prev, curr) => 
-      Math.abs(curr - term) < Math.abs(prev - term) ? curr : prev);
-    baseRate = baseRatesForAge[nearestTerm];
-  }
+  // Exact age x term lookup only. A missing cell means the combination is
+  // not priced - never substitute a neighbouring age or term silently.
+  const baseRate = product.rates[age]?.[term] ?? 0;
 
   if (baseRate === 0) return input.sumAssured;
 
@@ -104,82 +112,91 @@ export function calculateProjection(input: CalculationInput, selectedProductId: 
 
   const yearlyTotal = isSinglePremium ? modalPremium : (modalPremium * installmentsPerYear);
 
+  const isSSPEProduct = selectedProductId === 'sspe';
+  const isScepSingle = selectedProductId.startsWith('scep_single');
+  // SSPE and SCEP-Single certificates: RPU/ETI are NOT available.
+  const nonForfeitureAvailable = !isSSPEProduct && !isScepSingle;
+  // SSPE has NO policy loan; all other illustrated products allow up to
+  // 80% of CSV from the 4th policy year.
+  const loanAvailable = !isSSPEProduct;
+  const sspeMaturityBenefit = isSSPEProduct ? (selectedProduct?.maturityValue || sumAssured) : sumAssured;
+
   let cumulativePremium = 0;
   for (let t = 1; t <= term; t++) {
     const csvRate = (csvTable && csvTable[term]) ? csvTable[term][t] || 0 : 0;
-    const surrenderValue = Math.ceil((sumAssured / 1000) * csvRate);
-    
+    // CSV basis: SSPE's table is per BDT 1,000 of MATURITY BENEFIT (not of
+    // premium); every other product's table is per 1,000 of sum assured.
+    // The certificates deduct a BDT 200 processing fee from the table value.
+    const csvBase = isSSPEProduct ? sspeMaturityBenefit : sumAssured;
+    const csvGross = Math.ceil((csvBase / 1000) * csvRate);
+    const surrenderValue = csvGross > 0 ? Math.max(0, csvGross - 200) : 0;
+
     // Calculate yearly premium paid (WITHOUT RIDERS as requested)
     const yearlyPremiumIncr = (isSinglePremium ? (t === 1 ? yearlyTotal : 0) : yearlyTotal);
     cumulativePremium += yearlyPremiumIncr;
-    
+
     // RPU Calculation
     // Months paid / Months originally payable
     // Year t, months paid = t * 12 (if not single premium)
     const monthsPaid = isSinglePremium ? term * 12 : t * 12;
     const totalMonths = term * 12;
     const rpuFactor = Math.min(monthsPaid / totalMonths, 1);
-    
-    // Simplified partial maturity check for 3PP/4PP
+
+    // Stage payments are made AT the stage year-end, so a stage due in year t
+    // is already paid when valuing the end of year t (certificate wording:
+    // deduct stages already paid).
     let partialMaturitiesPaid = 0;
     if (selectedProductId === 's3pp') {
-      if (t > term / 3) partialMaturitiesPaid += sumAssured * 0.25;
-      if (t > (term * 2) / 3) partialMaturitiesPaid += sumAssured * 0.25;
+      if (t * 3 >= term) partialMaturitiesPaid += sumAssured * 0.25;
+      if (t * 3 >= term * 2) partialMaturitiesPaid += sumAssured * 0.25;
     } else if (selectedProductId === 's4pp') {
-      if (t > term / 4) partialMaturitiesPaid += sumAssured * 0.15;
-      if (t > (term * 2) / 4) partialMaturitiesPaid += sumAssured * 0.15;
-      if (t > (term * 3) / 4) partialMaturitiesPaid += sumAssured * 0.15;
+      if (t * 4 >= term) partialMaturitiesPaid += sumAssured * 0.15;
+      if (t * 4 >= term * 2) partialMaturitiesPaid += sumAssured * 0.15;
+      if (t * 4 >= term * 3) partialMaturitiesPaid += sumAssured * 0.15;
     }
 
-    const paidUpValue = t >= 2 ? Math.ceil((sumAssured * rpuFactor) - partialMaturitiesPaid) : 0;
+    const paidUpValue = nonForfeitureAvailable && t >= 2 ? Math.max(0, Math.ceil((sumAssured * rpuFactor) - partialMaturitiesPaid)) : 0;
 
-    // ETI Calculation (Return/Extra Amount Based on Full Term)
+    // ETI (Extended Term Insurance), certificate method: the ETI rate is an
+    // ANNUAL rate per BDT 1,000, so keeping the full cover to the original
+    // maturity date costs rate x remaining years x SA/1,000, paid out of the
+    // net surrender value. Any balance is returned in cash; if the surrender
+    // value cannot fund the full cover, the ETI cover reduces instead and
+    // there is no cash back.
     const remTerm = term - t;
     let etiCoverage = 0;
     let etiDurationStr = '—';
     let etiSurplus = 0;
-    
-    if (surrenderValue > 0 && remTerm > 0) {
-      const activeEtiTable = selectedProductId === 's4pp' ? S4PP_ETI_RATES : (selectedProductId === 's3pp' ? S3PP_ETI_RATES : ETI_RATES);
-      const etiAges = Object.keys(activeEtiTable).map(Number);
-      const nearestEtiAge = etiAges.reduce((prev, curr) => 
-        Math.abs(curr - (age + t)) < Math.abs(prev - (age + t)) ? curr : prev, 30);
-      const etiRatesForAge = activeEtiTable[nearestEtiAge];
-      
-      const termsAvailable = Object.keys(etiRatesForAge).map(Number).sort((a, b) => a - b);
-      
-      // User wants to know from specific year to maturity PORJONTO (until maturity)
-      // cost to maintain same life coverage (sumAssured) for remaining term
-      let rateFull = etiRatesForAge[remTerm];
-      if (rateFull === undefined) {
-          const maxT = Math.max(...termsAvailable);
-          if (remTerm > maxT) rateFull = etiRatesForAge[maxT];
-          else {
-            const nearestT = termsAvailable.reduce((prev, curr) => 
-              Math.abs(curr - remTerm) < Math.abs(prev - remTerm) ? curr : prev);
-            rateFull = etiRatesForAge[nearestT];
-          }
-      }
 
-      const costFull = (sumAssured / 1000) * (rateFull || 0);
-      const diff = surrenderValue - costFull;
-      
-      // Formatting as requested: positive figure for return, negative for extra required
-      etiDurationStr = (diff >= 0 ? "+" : "") + Math.ceil(diff).toLocaleString();
-      etiCoverage = sumAssured;
-      etiSurplus = Math.ceil(diff);
+    if (nonForfeitureAvailable && surrenderValue > 0 && remTerm > 0) {
+      const activeEtiTable = selectedProductId === 's4pp' ? S4PP_ETI_RATES : (selectedProductId === 's3pp' ? S3PP_ETI_RATES : ETI_RATES);
+      const rateFull = activeEtiTable[age + t]?.[remTerm];
+      if (rateFull) {
+        const costFull = (sumAssured / 1000) * rateFull * remTerm;
+        if (surrenderValue >= costFull) {
+          etiCoverage = sumAssured;
+          etiSurplus = Math.floor(surrenderValue - costFull);
+        } else {
+          etiCoverage = Math.floor(surrenderValue / (rateFull * remTerm)) * 1000;
+          etiSurplus = 0;
+        }
+        etiDurationStr = "+" + etiSurplus.toLocaleString();
+      }
     }
+
+    const loanValue = loanAvailable && t >= 4 ? Math.floor(surrenderValue * 0.8) : 0;
 
     projection.push({
       year: t,
       premium: cumulativePremium,
-      deathBenefit: sumAssured,
+      deathBenefit: isSSPEProduct ? sspeMaturityBenefit : sumAssured,
       surrenderValue: surrenderValue,
       maturityValue: t === term ? (selectedProduct?.maturityValue || sumAssured) : 0,
-      paidUpValue: Math.max(0, paidUpValue),
+      paidUpValue: paidUpValue,
       etiCoverage: etiCoverage,
       etiSurplus: etiSurplus,
-      etiDurationStr: etiDurationStr
+      etiDurationStr: etiDurationStr,
+      loanValue: loanValue
     });
   }
 
@@ -203,23 +220,10 @@ export function calculatePremiums(input: CalculationInput): (CalculationResult |
   ];
 
   const standardResults = products.map(product => {
-    // Nearest neighbor lookup for age
-    const agesAvailable = Object.keys(product.rates).map(Number);
-    const targetAge = agesAvailable.reduce((prev, curr) => 
-      Math.abs(curr - age) < Math.abs(prev - age) ? curr : prev, 26);
-    
-    const baseRatesForAge = product.rates[targetAge] || product.rates[26];
-    
-    // Check for exact term first, then nearest term
-    let baseRate = baseRatesForAge ? baseRatesForAge[term] : null;
-    if (!baseRate && baseRatesForAge) {
-      const termsAvailable = Object.keys(baseRatesForAge).map(Number);
-      if (termsAvailable.length > 0) {
-        const nearestTerm = termsAvailable.reduce((prev, curr) => 
-          Math.abs(curr - term) < Math.abs(prev - term) ? curr : prev);
-        baseRate = baseRatesForAge[nearestTerm];
-      }
-    }
+    // Exact age x term lookup only (certificate tables). A missing cell means
+    // this age/term combination is not priced for the product - report it as
+    // not applicable instead of silently substituting a neighbouring cell.
+    const baseRate = product.rates[age]?.[term] ?? null;
     
     if (!baseRate) {
       return {
@@ -243,18 +247,21 @@ export function calculatePremiums(input: CalculationInput): (CalculationResult |
     const basePremiumYearly = isSSPE ? sumAssured : (baseRate * sumAssured) / 1000;
     const maturityValue = isSSPE ? Math.ceil(sumAssured * baseRate) : sumAssured;
     
-    // Calculate individual riders
+    // Calculate individual riders. SSPE has NO riders (certificate) - its
+    // accidental add-on is embedded and capped separately.
     let adbYearly = 0;
     let ciClassicYearly = 0;
     let ciStandardYearly = 0;
-    
-    if (hasAccidentalProtection) {
-      adbYearly = (ACCIDENTAL_RATE * sumAssured) / 1000;
+
+    if (hasAccidentalProtection && !isSSPE) {
+      const riderSA = Math.min(sumAssured, ACCIDENTAL_MAX_SA);
+      adbYearly = (accidentalRateForAge(age) * riderSA) / 1000;
     }
-    
-    // CI Eligibility - Coverage is 50% of Sum Assured, max 30 Lakh (3,000,000)
-    // Shared rider rules live in data/ciDiseases so pricing, the app and the report agree.
-    const isCIEligible = isCiRiderEligible(sumAssured);
+
+    // CI Eligibility - Coverage is 50% of Sum Assured, max 15 Lakh (1,500,000)
+    // per the Rider Brochure. Shared rider rules live in data/ciDiseases so
+    // pricing, the app and the report agree.
+    const isCIEligible = !isSSPE && isCiRiderEligible(sumAssured);
     const ciCoverage = ciCoverageAmount(sumAssured);
     if (hasCIClassic && isCIEligible) {
       ciClassicYearly = (getCIRate(age, term, gender, 'Classic') * ciCoverage) / 1000;
