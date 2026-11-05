@@ -2024,7 +2024,7 @@ export default function Calculator() {
                      <th className="p-3 md:p-5 font-black text-slate-500 uppercase tracking-widest border-l border-brand-primary/5 text-[11px]">Natural death</th>
                      <th className="p-3 md:p-5 font-black text-brand-gold uppercase tracking-widest border-l border-brand-primary/5 text-[11px]">Surrender value</th>
                      <th className="p-3 md:p-5 font-black text-slate-500 uppercase tracking-widest border-l border-brand-primary/5 text-[11px]">Paid Up Value</th>
-                     <th className="p-3 md:p-5 font-black text-slate-500 uppercase tracking-widest border-l border-brand-primary/5 text-[11px]">ETI Benefits</th>
+                     <th className="p-3 md:p-5 font-black text-slate-500 uppercase tracking-widest border-l border-brand-primary/5 text-[11px]">ETI Cash Back</th>
                   </tr>
                </thead>
                <tbody className="divide-y divide-brand-primary/5">
