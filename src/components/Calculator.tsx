@@ -18,6 +18,9 @@ import { CalculationInput, CalculationResult, PlanFrequency, Gender, SDPPResult,
 import { CLASSIC_CI_DISEASES, MINOR_CI_DISEASES, MAJOR_CI_DISEASES, CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR, CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR, CI_MINOR_BENEFIT_SHARE, ciCoverageAmount, ciDiseaseLabel } from '../data/ciDiseases';
 import { differenceInYears, parse, format } from 'date-fns';
 import PlanQuotationModal from './PlanQuotationModal';
+import PremiumBreakdownModal from './PremiumBreakdownModal';
+import ModeComparisonModal from './ModeComparisonModal';
+import CriticalIllnessDialog from './CriticalIllnessDialog';
 import TermComparisonModal from './TermComparisonModal';
 
 const FREQUENCIES: PlanFrequency[] = ['Monthly', 'Quarterly', 'Half-yearly', 'Yearly', 'Single'];
@@ -186,6 +189,8 @@ export default function Calculator() {
   const [previewSection, setPreviewSection] = useState<'quotation' | 'term' | 'policy' | 'liquidity'>('quotation');
   const [liquidityDetails, setLiquidityDetails] = useState(false);
   const [ciInfoView, setCiInfoView] = useState<'classic' | 'standard' | null>(null);
+  const [premiumBreakdownOpen, setPremiumBreakdownOpen] = useState(false);
+  const [modeComparisonOpen, setModeComparisonOpen] = useState(false);
   const [isExportingSection, setIsExportingSection] = useState(false);
   const printSection = (id: string) => { const el = document.getElementById(id); if (!el) return; const w = window.open('', '_blank'); if (!w) return; w.document.write('<html><head><title>PremiumPulse Comparison</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#36403b}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f0f1df}@page{size:landscape;margin:12mm}</style></head><body>'+el.innerHTML+'</body></html>'); w.document.close(); w.focus(); w.print(); };
   const downloadSection = async (id: string, filename: string) => {
@@ -3279,6 +3284,8 @@ export default function Calculator() {
                         embedded
                         showProjection={false}
                         onViewDiseases={setCiInfoView}
+                        onViewPremiumBreakdown={() => setPremiumBreakdownOpen(true)}
+                        onViewModeComparison={() => setModeComparisonOpen(true)}
                         isOpen={true}
                         onClose={() => setAppState('inputs')}
                         input={input}
@@ -3301,10 +3308,16 @@ export default function Calculator() {
         )}
       </AnimatePresence>}
 
-      {ciInfoView && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-label="Critical illness diseases"><div className="w-full max-w-2xl max-h-[90dvh] overflow-y-auto rounded-2xl bg-white p-4 sm:p-6 shadow-xl"><div className="flex items-center justify-between gap-2 mb-4"><h2 className="font-bold text-lg text-brand-text">Critical Illness {ciInfoView === 'classic' ? 'Classic' : 'Standard'}</h2><div className="flex gap-2"><button type="button" title="Download disease list" aria-label="Download disease list" onClick={()=>downloadSection('ci-disease-content',ciInfoView+'-critical-illness.pdf')} className="rounded-lg border p-2"><Download className="w-5 h-5"/></button><button type="button" title="Close" aria-label="Close disease list" onClick={()=>setCiInfoView(null)} className="rounded-lg border p-2"><X className="w-5 h-5"/></button></div></div><div id="ci-disease-content" className="space-y-5 bg-white p-2 text-brand-text"><h3 className="font-bold">Critical Illness {ciInfoView === 'classic'?'Classic':'Standard'}</h3>{ciInfoView === 'classic' ? <section><p className="text-sm font-semibold mb-2">{CLASSIC_CI_DISEASES.length} covered diseases · Coverage: {formatCurrency(ciCoverageAmount(input.sumAssured))}</p><ol className="list-decimal pl-6 space-y-1 text-sm">{CLASSIC_CI_DISEASES.map(d=><li key={ciDiseaseLabel(d)}>{ciDiseaseLabel(d)}</li>)}</ol></section> : <><section><h4 className="font-bold">Minor Critical Illness ({MINOR_CI_DISEASES.length})</h4><p className="text-sm mb-2">{Math.round(CI_MINOR_BENEFIT_SHARE*100)}% of CI coverage: {formatCurrency(ciCoverageAmount(input.sumAssured)*CI_MINOR_BENEFIT_SHARE)}</p><ol className="list-decimal pl-6 space-y-1 text-sm">{MINOR_CI_DISEASES.map(d=><li key={ciDiseaseLabel(d)}>{ciDiseaseLabel(d)}</li>)}</ol></section><section><h4 className="font-bold">Major Critical Illness ({MAJOR_CI_DISEASES.length})</h4><p className="text-sm mb-2">If Minor claimed: {Math.round(CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR*100)}% — {formatCurrency(ciCoverageAmount(input.sumAssured)*CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR)}. If Minor not claimed: {Math.round(CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR*100)}% — {formatCurrency(ciCoverageAmount(input.sumAssured)*CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR)}.</p><ol className="list-decimal pl-6 space-y-1 text-sm">{MAJOR_CI_DISEASES.map(d=><li key={ciDiseaseLabel(d)}>{ciDiseaseLabel(d)}</li>)}</ol></section></>}</div></div></div>}
+      <CriticalIllnessDialog view={ciInfoView} onClose={() => setCiInfoView(null)} input={input} onDownload={downloadSection} />
+
+      <PremiumBreakdownModal isOpen={premiumBreakdownOpen} onClose={() => setPremiumBreakdownOpen(false)} input={input} selectedProduct={selectedProduct} />
+
+      <ModeComparisonModal isOpen={modeComparisonOpen} onClose={() => setModeComparisonOpen(false)} input={input} selectedProduct={selectedProduct} />
 
       <PlanQuotationModal
         onViewDiseases={setCiInfoView}
+        onViewPremiumBreakdown={() => setPremiumBreakdownOpen(true)}
+        onViewModeComparison={() => setModeComparisonOpen(true)}
         isOpen={showQuotationModal}
         onClose={() => setShowQuotationModal(false)}
         input={input}

@@ -8,6 +8,8 @@ import {
 import { cn, formatCurrency } from '../lib/utils';
 import { CalculationInput, CalculationResult, SDPPResult, ProjectionRow } from '../data/types';
 import { createQuotationPdf, quotationFilename } from '../lib/quotationPdf';
+import { accidentalRiderBenefits, modeComparisonRows, naturalDeathCover, scepStipend, stagePayouts } from '../lib/quotationPreview';
+import { CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR, CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR, CI_MINOR_BENEFIT_SHARE, ciCoverageAmount, isCiRiderEligible } from '../data/ciDiseases';
 
 interface PlanQuotationModalProps {
   isOpen: boolean;
@@ -15,6 +17,8 @@ interface PlanQuotationModalProps {
   embedded?: boolean;
   showProjection?: boolean;
   onViewDiseases?: (type: 'classic' | 'standard') => void;
+  onViewPremiumBreakdown?: () => void;
+  onViewModeComparison?: () => void;
   input: CalculationInput;
   selectedProduct?: CalculationResult;
   sdppData?: SDPPResult;
@@ -33,6 +37,8 @@ export default function PlanQuotationModal({
   embedded = false,
   showProjection = true,
   onViewDiseases,
+  onViewPremiumBreakdown,
+  onViewModeComparison,
   input,
   selectedProduct,
   sdppData,
@@ -76,7 +82,6 @@ export default function PlanQuotationModal({
 
   
   const page1Ref = useRef<HTMLDivElement>(null);
-  const page2Ref = useRef<HTMLDivElement>(null);
 
   if (!isOpen) return null;
 
@@ -100,6 +105,26 @@ export default function PlanQuotationModal({
      input.paymentMethod === 'Monthly' ? input.term * 12 : 1);
 
   const primaryMaturity = selectedProduct?.maturityValue || input.sumAssured;
+
+  // Redesigned standard quotation preview (single non-SDPP policy only).
+  // Every value below comes from the engine result or the shared quotation
+  // rules; see src/lib/quotationPreview.ts.
+  const standardDeathCover = selectedProduct ? naturalDeathCover(selectedProduct, input.sumAssured) : input.sumAssured;
+  const standardModeRows = selectedProduct ? modeComparisonRows(selectedProduct, input.term, primaryMaturity, standardDeathCover, input.paymentMethod) : [];
+  const standardStages = selectedProduct ? stagePayouts(selectedProduct.productId, input.term, input.sumAssured, issueYear) : [];
+  const standardStipend = selectedProduct ? scepStipend(selectedProduct.productId, input.sumAssured) : null;
+  const standardCiCoverage = (input.hasCIClassic || input.hasCIStandard) && isCiRiderEligible(input.sumAssured)
+    ? (input.ciCoverage || ciCoverageAmount(input.sumAssured))
+    : 0;
+  const standardAdb = input.hasAccidentalProtection ? accidentalRiderBenefits(input.sumAssured) : null;
+
+  // The mode comparison lives behind the Compare button now, so the visible
+  // sections are always numbered in order: 1 summary, 2 benefits, 3
+  // projection. The Compare button itself only shows when the plan offers
+  // more than one mode (single-premium plans have nothing to compare).
+  const standardHasModes = standardModeRows.length > 1;
+  const standardBenefitsNum = 2;
+  const standardProjectionNum = 3;
 
   // Target Sum Assured calculation
   const calculatedSdppSa = typeof sdppData?.deathBenefit === 'number' 
@@ -215,57 +240,26 @@ export default function PlanQuotationModal({
     <div className={embedded ? "w-full flex justify-center print:block" : "fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 print:p-0 print:bg-white print:fixed print:inset-0"}>
       <div className={embedded ? "w-full min-w-0 flex flex-col bg-slate-100 print:bg-white" : "bg-white rounded-2xl md:rounded-3xl shadow-2xl max-w-7xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200 print:max-h-none print:shadow-none print:border-none print:rounded-none print:w-full"}>
         
-        {/* Modal Action Header (Hidden when printing) */}
-        <div className={cn("bg-slate-900 text-white p-3 md:px-8 flex items-center justify-end border-b border-slate-800 print:hidden flex-shrink-0", embedded && "bg-white border-[#e5e8df]")}>
-          <div className="flex items-center gap-1.5 sm:gap-3">
-            <button
-              title="Print quotation" aria-label="Print quotation"
-              onClick={handlePrint}
-              className="px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer"
-            >
-              <Printer className="w-4 h-4 text-slate-300" />
-              <span className="hidden sm:inline">Print</span>
-            </button>
-
-            <button
-              title="Download PDF" aria-label={isGeneratingPdf ? "Generating quotation PDF" : "Download PDF"} aria-busy={isGeneratingPdf}
-              onClick={handleDownloadPdf}
-              disabled={isGeneratingPdf}
-              className="px-4 py-2.5 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-brand-primary/20 transition-all cursor-pointer disabled:opacity-50"
-            >
-              {isGeneratingPdf ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span className="hidden sm:inline">Generating...</span>
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4" />
-                  <span className="hidden sm:inline">Download PDF</span>
-                </>
-              )}
-            </button>
-
+        {/* Modal close only (dialog mode). Print / Download PDF live at the
+            very end of the preview now, after all content — a button bar
+            between the summary and the content split the page in two. */}
+        {!embedded && (
+          <div className="bg-slate-900 text-white p-3 md:px-8 flex items-center justify-end border-b border-slate-800 print:hidden flex-shrink-0">
             <button
               onClick={onClose}
-              className={cn("w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer ml-2", embedded && "hidden")}
+              title="Close" aria-label="Close quotation"
+              className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
-        </div>
-
-        <div className="print:hidden bg-white px-4 py-3 border-b border-slate-200">
-          <p className="text-xs text-slate-600" role="status" aria-live="polite">
-            {isGeneratingPdf ? 'Preparing your personalized A4 quotation…' : 'PDF download includes a clean, print-ready summary, benefit details and available policy projections.'}
-          </p>
-          {pdfError && <p role="alert" className="mt-2 text-sm text-red-700">{pdfError} You can retry using Download PDF.</p>}
-        </div>
+        )}
 
         {/* Document Scroll Area */}
-        <div ref={documentAreaRef} className={cn("overflow-auto p-3 sm:p-6 space-y-8 bg-slate-100 print:p-0 print:overflow-visible text-slate-800 font-sans", embedded && "w-full")} id={embedded ? "quotation-document-inline" : "quotation-document"} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd} style={{ touchAction: "pan-x pan-y" }}>
+        <div ref={documentAreaRef} className={cn("overflow-auto p-3 sm:p-6 space-y-8 print:p-0 print:overflow-visible text-slate-800 font-sans", embedded && "w-full", (isComboEnabled || isSDPP) ? "bg-slate-100" : "bg-[#f7f8ef]")} id={embedded ? "quotation-document-inline" : "quotation-document"} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd} style={{ touchAction: "pan-x pan-y" }}>
           
-          {/* Printable Official Document - PAGE 1 */}
+          {/* Combo & SDPP keep the existing paper-sheet layout */}
+          {(isComboEnabled || isSDPP) && (
           <div 
             ref={page1Ref}
             data-quotation-content="true"
@@ -748,7 +742,7 @@ export default function PlanQuotationModal({
               </div>
             ) : (
               <>
-                {/* Standard Single Policy Layout */}
+                {/* Standard Single Policy Layout — SDPP keeps the existing layout */}
                 <div className="space-y-3">
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-200 pb-2 flex items-center justify-between">
                     <span>1. Premium Commitment & Deposit Summary</span>
@@ -1280,66 +1274,253 @@ export default function PlanQuotationModal({
             )}
 
           </div>
+          )}
 
-          {/* Printable Official Document - PAGE 2 (Only for non-combo / non-SDPP primary policy) */}
+          {/* Standard single-policy quotation — one continuous app-style page.
+              No paper sheet, no letterhead: the logo, client details and
+              policy grid live in the downloaded PDF illustration only. */}
           {!isComboEnabled && !isSDPP && (
-            <div 
-              ref={page2Ref}
+            <div
               data-quotation-content="true"
-              data-page="2"
-              className="bg-white space-y-6 print:border-none print:shadow-none" style={{ zoom: fitZoom * documentZoom, width: 800, minWidth: 800, minHeight: 1131, boxSizing: 'border-box', padding: '24px 28px', margin: '0 auto', borderRadius: 0, border: 'none', boxShadow: '0 8px 28px rgba(15, 23, 42, 0.10)' }}
+              data-page="1"
+              className="w-full space-y-4 sm:space-y-6"
             >
-              {/* Page 2 Header Banner */}
-              <div className="flex justify-between items-center border-b border-slate-200 pb-3">
-                <div className="flex items-center gap-2">
-                  <img src="/shanta-life-logo.png" alt="Shanta Life" className="w-28 h-auto object-contain flex-shrink-0" />
-                  
+              {/* Slim heading — product + term only */}
+              <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-lg font-bold text-brand-text">{selectedProduct?.productName || 'Shanta Insurance Policy'}</h2>
+                  <span className="rounded-full bg-[#f0f1df] px-3 py-1 text-xs font-bold text-brand-text">{input.term} Years</span>
                 </div>
-                <span className="text-[10px] text-slate-500 font-medium">
-                  Date: {issueDateStr} • Page 2 of 2
-                </span>
+                <p className="mt-1 text-[11px] text-slate-400">Unofficial sample illustration</p>
               </div>
+              {/* Redesigned standard quotation — single non-SDPP policy.
+                  Order: 1. selected plan summary (Breakdown and Compare open
+                  their dialogs from the premium tile), 2. core benefits
+                  (survival, death, riders). Combo and SDPP keep the existing
+                  layouts above. */}
+              <div className="space-y-4 sm:space-y-6">
+                {/* 1. Your plan at a glance — selected product + selected mode */}
+                <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-3">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-brand-text border-b-2 border-brand-primary/40 pb-2 flex items-center justify-between">
+                    <span>1. Your Plan at a Glance</span>
+                    <span className="text-[10px] font-mono text-slate-500">All amounts in BDT (৳)</span>
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="rounded-xl border border-[#e5e8df] bg-white p-3">
+                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{input.paymentMethod} premium</div>
+                      <div className="mt-1 font-mono text-base font-black text-brand-text">{formatCurrency(selectedProduct?.totalPremium?.[input.paymentMethod] || 0)}</div>
+                      <div className="mt-0.5 text-[10px] text-slate-500">per payment</div>
+                      {(onViewPremiumBreakdown || (onViewModeComparison && standardHasModes)) && (
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                          {onViewPremiumBreakdown && (
+                            <button type="button" onClick={onViewPremiumBreakdown} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">Breakdown →</button>
+                          )}
+                          {onViewModeComparison && standardHasModes && (
+                            <button type="button" onClick={onViewModeComparison} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">Compare →</button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-xl border border-[#e5e8df] bg-white p-3">
+                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Total premium paid</div>
+                      <div className="mt-1 font-mono text-base font-black text-brand-text">{formatCurrency(primaryPaid)}</div>
+                      <div className="mt-0.5 text-[10px] text-slate-500">over {input.term} years</div>
+                    </div>
+                    <div className="rounded-xl border border-brand-primary/40 bg-[#F9FAF3] p-3">
+                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Maturity payout</div>
+                      <div className="mt-1 font-mono text-base font-black text-brand-primary">{formatCurrency(primaryMaturity)}</div>
+                      <div className="mt-0.5 text-[10px] text-slate-500">{standardStages.length > 0 ? `in ${standardStages.length} stage payouts` : `at year ${input.term} (${issueYear + input.term})`}</div>
+                    </div>
+                    <div className="rounded-xl border border-brand-primary/40 bg-[#F9FAF3] p-3">
+                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Death cover</div>
+                      <div className="mt-1 font-mono text-base font-black text-brand-primary">{formatCurrency(standardDeathCover)}</div>
+                      <div className="mt-0.5 text-[10px] text-slate-500">paid to your nominee</div>
+                    </div>
+                  </div>
+                </div>
 
+                {/* 2. Core benefits */}
+                <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-4">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-brand-text border-b-2 border-brand-primary/40 pb-2">
+                    {standardBenefitsNum}. Core Benefits
+                  </h3>
+
+                  {/* Survival and death panels sit side by side on wider screens
+                      (they stack on mobile) so the full-width layout reads well. */}
+                  <div className="grid gap-4 md:grid-cols-2">
+                  {/* Survival benefits — what you receive while alive */}
+                  <div className="bg-[#f7f8ef] border border-[#e5e8df] rounded-xl p-4 space-y-3">
+                    <h4 className="text-xs font-black uppercase text-brand-text flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-brand-primary" /> If you stay alive — survival benefits
+                    </h4>
+                    {standardStages.length > 0 ? (
+                      <div className="space-y-2">
+                        <div className="overflow-x-auto border border-[#e5e8df] rounded-lg bg-white">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-[#f0f1df] font-bold text-[10px] uppercase tracking-wider text-slate-700">
+                                <th className="p-2.5 border-r border-[#e5e8df]">Payout</th>
+                                <th className="p-2.5 border-r border-[#e5e8df] text-center">Policy year</th>
+                                <th className="p-2.5 border-r border-[#e5e8df] text-center">Calendar year</th>
+                                <th className="p-2.5 text-right">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#e5e8df]">
+                              {standardStages.map((stage) => (
+                                <tr key={stage.label} className="hover:bg-[#f7f8ef]">
+                                  <td className="p-2.5 border-r border-[#e5e8df] font-bold text-brand-text">{stage.label} ({stage.percent}%)</td>
+                                  <td className="p-2.5 border-r border-[#e5e8df] text-center font-mono">Year {stage.policyYear}</td>
+                                  <td className="p-2.5 border-r border-[#e5e8df] text-center font-mono">{stage.calendarYear}</td>
+                                  <td className="p-2.5 text-right font-mono font-bold text-brand-text">{formatCurrency(stage.amount)}</td>
+                                </tr>
+                              ))}
+                              <tr className="bg-[#f0f1df] font-black text-brand-text">
+                                <td colSpan={3} className="p-2.5 border-r border-[#e5e8df] uppercase text-[10px] tracking-wider">Total you will receive</td>
+                                <td className="p-2.5 text-right font-mono text-brand-primary">{formatCurrency(input.sumAssured)}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="text-[11px] text-slate-500">Stage payouts are part of the full sum assured — not additional to it.</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div>
+                          <div className="text-xs font-bold text-brand-text">Maturity payout — Year {input.term} ({issueYear + input.term})</div>
+                          {isChildPlan && <div className="text-[11px] text-slate-500">Paid at maturity even after the stipend starts.</div>}
+                        </div>
+                        <div className="font-mono font-black text-base text-brand-primary text-right">{formatCurrency(primaryMaturity)}</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Death benefits — including the Child Education stipend story */}
+                  <div className="bg-[#f7f8ef] border border-[#e5e8df] rounded-xl p-4 space-y-3">
+                    <h4 className="text-xs font-black uppercase text-brand-text flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-brand-primary" /> If the policyholder dies
+                    </h4>
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                      <div className="text-xs font-bold text-brand-text">Death cover — paid to your nominee</div>
+                      <div className="font-mono font-black text-base text-brand-text text-right">{formatCurrency(standardDeathCover)}</div>
+                    </div>
+                    {isChildPlan && standardStipend && (
+                      <div className="space-y-2 pt-2 border-t border-[#e5e8df]">
+                        <div className="rounded-lg border-2 border-[#F37021] bg-[#FFF4ED] p-3 space-y-1">
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                            <div>
+                              <div className="text-xs font-black uppercase text-brand-text">Monthly education stipend — {Math.round(standardStipend.percent * 100)}% of sum assured</div>
+                              <div className="text-[11px] text-slate-600">Paid every month until maturity, so your child's education continues.</div>
+                            </div>
+                            <div className="font-mono font-black text-base text-brand-text text-right whitespace-nowrap">{formatCurrency(standardStipend.monthly)} <span className="text-xs font-bold">/ month</span></div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs">
+                          <div className="font-bold text-brand-text">At maturity — full sum assured again</div>
+                          <div className="font-mono font-black text-brand-text text-right">{formatCurrency(input.sumAssured)}</div>
+                        </div>
+                        <p className="text-[11px] text-slate-500">Future premiums are waived — subject to covered event and policy terms.</p>
+                      </div>
+                    )}
+                  </div>
+                  </div>
+
+                  {/* Rider benefits — only the riders actually selected */}
+                  {(standardAdb || standardCiCoverage > 0) && (
+                    <div className="bg-[#f7f8ef] border border-[#e5e8df] rounded-xl p-4 space-y-4">
+                      <h4 className="text-xs font-black uppercase text-brand-text flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-brand-primary" /> Your riders
+                      </h4>
+                      {standardAdb && (
+                        <div className="space-y-2">
+                          <div className="text-[11px] font-black uppercase tracking-wider text-slate-700">Accidental Protection rider</div>
+                          <div className="space-y-1.5 text-xs">
+                            <div className="flex justify-between items-center gap-2">
+                              <span className="text-slate-700">Accidental death cover (total, including base cover)</span>
+                              <span className="font-mono font-bold text-brand-text text-right">{formatCurrency(standardAdb.deathCoverTotal)}</span>
+                            </div>
+                            <div className="flex justify-between items-center gap-2">
+                              <span className="text-slate-700">Permanent total / partial disability — each</span>
+                              <span className="font-mono font-bold text-brand-text text-right">{formatCurrency(standardAdb.disabilityEach)}</span>
+                            </div>
+                            <div className="flex justify-between items-center gap-2">
+                              <span className="text-slate-700">Accidental medical reimbursement — up to</span>
+                              <span className="font-mono font-bold text-brand-text text-right">{formatCurrency(standardAdb.medicalReimbursementMax)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {standardCiCoverage > 0 && (
+                        <div className="space-y-2 pt-3 border-t border-[#e5e8df]">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-[11px] font-black uppercase tracking-wider text-slate-700">Critical Illness — {input.hasCIClassic ? 'Classic' : 'Standard'} rider</div>
+                            {(input.hasCIClassic || input.hasCIStandard) && onViewDiseases && <button type="button" onClick={() => onViewDiseases(input.hasCIClassic ? 'classic' : 'standard')} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">View Diseases →</button>}
+                          </div>
+                          <div className="space-y-1.5 text-xs">
+                            <div className="flex justify-between items-center gap-2">
+                              <span className="text-slate-700">Critical illness coverage</span>
+                              <span className="font-mono font-bold text-brand-text text-right">{formatCurrency(standardCiCoverage)}</span>
+                            </div>
+                            {input.hasCIClassic ? (
+                              <p className="text-[11px] text-slate-500">Every covered condition pays the full coverage amount.</p>
+                            ) : (
+                              <>
+                                <div className="flex justify-between items-center gap-2">
+                                  <span className="text-slate-700">Minor condition — {Math.round(CI_MINOR_BENEFIT_SHARE * 100)}% of coverage</span>
+                                  <span className="font-mono font-bold text-brand-text text-right">{formatCurrency(standardCiCoverage * CI_MINOR_BENEFIT_SHARE)}</span>
+                                </div>
+                                <div className="flex justify-between items-center gap-2">
+                                  <span className="text-slate-700">Major condition — {Math.round(CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR * 100)}% if no minor claimed, {Math.round(CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR * 100)}% if minor claimed</span>
+                                  <span className="font-mono font-bold text-brand-text text-right">{formatCurrency(standardCiCoverage * CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR)} / {formatCurrency(standardCiCoverage * CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR)}</span>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
               {/* Projection Schedule Table - Matching Liquidity View Columns & Data */}
               {showProjection && projectionData && projectionData.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between border-b-2 border-slate-200 pb-2">
-                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-900">
-                      3. Policy Value Projection Trajectory
+                <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-3">
+                  <div className="flex items-center justify-between border-b-2 border-brand-primary/40 pb-2">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-brand-text">
+                      {standardProjectionNum}. Policy Value Projection Trajectory
                     </h3>
                     <span className="text-[10px] text-slate-500 font-normal">
                       Illustrative schedule over {input.term} years
                     </span>
                   </div>
 
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                  <div className="overflow-x-auto border border-[#e5e8df] rounded-xl">
                     <table className="w-full text-left text-[11px] border-collapse">
                       <thead>
-                        <tr className="bg-slate-900 text-white font-bold text-[9px] uppercase tracking-wider">
-                          <th className="p-2.5 border-r border-slate-800 text-center">END OF YEAR</th>
-                          <th className="p-2.5 border-r border-slate-800 text-right">BASE PREMIUM</th>
-                          <th className="p-2.5 border-r border-slate-800 text-right">NATURAL DEATH</th>
-                          <th className="p-2.5 border-r border-slate-800 text-right">SURRENDER VALUE</th>
-                          <th className="p-2.5 border-r border-slate-800 text-right">PAID UP VALUE</th>
+                        <tr className="bg-[#f0f1df] text-brand-text font-bold text-[9px] uppercase tracking-wider">
+                          <th className="p-2.5 border-r border-[#e5e8df] text-center">END OF YEAR</th>
+                          <th className="p-2.5 border-r border-[#e5e8df] text-right">BASE PREMIUM</th>
+                          <th className="p-2.5 border-r border-[#e5e8df] text-right">NATURAL DEATH</th>
+                          <th className="p-2.5 border-r border-[#e5e8df] text-right">SURRENDER VALUE</th>
+                          <th className="p-2.5 border-r border-[#e5e8df] text-right">PAID UP VALUE</th>
                           <th className="p-2.5 text-center">ETI BENEFITS</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-200">
+                      <tbody className="divide-y divide-[#e5e8df]">
                         {projectionData.map((row) => (
-                          <tr key={row.year} className="hover:bg-slate-50">
-                            <td className="p-2 border-r border-slate-200 text-center font-bold text-slate-700">
+                          <tr key={row.year} className="hover:bg-[#f7f8ef]">
+                            <td className="p-2 border-r border-[#e5e8df] text-center font-bold text-slate-700">
                               {row.year}
                             </td>
-                            <td className="p-2 border-r border-slate-200 text-right font-mono font-medium text-slate-900">
+                            <td className="p-2 border-r border-[#e5e8df] text-right font-mono font-medium text-brand-text">
                               {row.premium > 0 ? formatCurrency(row.premium) : '—'}
                             </td>
-                            <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-slate-900">
+                            <td className="p-2 border-r border-[#e5e8df] text-right font-mono font-bold text-brand-text">
                               {formatCurrency(row.deathBenefit || input.sumAssured)}
                             </td>
-                            <td className="p-2 border-r border-slate-200 text-right font-mono text-brand-primary font-bold">
+                            <td className="p-2 border-r border-[#e5e8df] text-right font-mono text-brand-primary font-bold">
                               {row.surrenderValue > 0 ? formatCurrency(row.surrenderValue) : '—'}
                             </td>
-                            <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-700 font-medium">
+                            <td className="p-2 border-r border-[#e5e8df] text-right font-mono text-slate-700 font-medium">
                               {row.paidUpValue > 0 ? formatCurrency(row.paidUpValue) : '—'}
                             </td>
                             <td className="p-2 text-center font-mono text-[10px]">
@@ -1366,40 +1547,84 @@ export default function PlanQuotationModal({
                   </div>
                 </div>
               )}
+              {/* Good to know + disclaimer sit side by side on wider screens. */}
+              <div className="grid gap-4 lg:grid-cols-2">
+              {/* Good to know before you decide */}
+              <div className="bg-[#f7f8ef] border border-brand-primary/30 rounded-xl p-4 space-y-2 text-[10px] text-slate-700 leading-relaxed">
+                <h4 className="font-bold uppercase tracking-wider text-brand-text text-[11px]">Good to know before you decide</h4>
+                <ul className="list-disc list-inside space-y-1.5 font-medium">
+                  <li>You get <strong>31 days of grace</strong> to pay a due premium. If premiums stop after at least 2 years, most plans let you keep a reduced <strong>paid-up</strong> cover instead of surrendering.</li>
+                  <li>If you <strong>surrender early</strong>, the amount you receive (see the year-by-year values) is in the early years <strong>less than the premiums you have paid</strong>. For stage-paying plans the value also falls just after a stage payment, because that money has already been paid to you.</li>
+                  <li>Where the plan allows, you may take a <strong>policy loan of up to 80% of the surrender value</strong> from the 4th policy year; interest applies as set by the company from time to time.</li>
+                  <li><strong>ETI</strong> (where available) uses part of your surrender value to keep the <strong>full death cover until the original maturity date</strong> and returns the rest in cash. It is protection only - if you survive to maturity, nothing further is payable under ETI.</li>
+                  <li>Any <strong>income-tax rebate</strong> depends on your income, the approved investment limit and the NBR rules in force, which can change. No tax saving is guaranteed by this illustration.</li>
+                  <li>Keep your <strong>nominee</strong> information updated - benefits on death are paid to your nominee. Questions? Call the Shanta Life hotline <strong>16758</strong>.</li>
+                </ul>
+              </div>
 
-            {/* Good to know before you decide */}
-            <div className="bg-[#f7f8ef] border border-brand-primary/30 rounded-xl p-4 space-y-2 text-[10px] text-slate-700 leading-relaxed">
-              <h4 className="font-bold uppercase tracking-wider text-slate-900 text-[11px]">Good to know before you decide</h4>
-              <ul className="list-disc list-inside space-y-1.5 font-medium">
-                <li>You get <strong>31 days of grace</strong> to pay a due premium. If premiums stop after at least 2 years, most plans let you keep a reduced <strong>paid-up</strong> cover instead of surrendering.</li>
-                <li>If you <strong>surrender early</strong>, the amount you receive (see the year-by-year values) is in the early years <strong>less than the premiums you have paid</strong>. For stage-paying plans the value also falls just after a stage payment, because that money has already been paid to you.</li>
-                <li>Where the plan allows, you may take a <strong>policy loan of up to 80% of the surrender value</strong> from the 4th policy year; interest applies as set by the company from time to time.</li>
-                <li><strong>ETI</strong> (where available) uses part of your surrender value to keep the <strong>full death cover until the original maturity date</strong> and returns the rest in cash. It is protection only - if you survive to maturity, nothing further is payable under ETI.</li>
-                <li>Any <strong>income-tax rebate</strong> depends on your income, the approved investment limit and the NBR rules in force, which can change. No tax saving is guaranteed by this illustration.</li>
-                <li>Keep your <strong>nominee</strong> information updated - benefits on death are paid to your nominee. Questions? Call the Shanta Life hotline <strong>16758</strong>.</li>
-              </ul>
+              {/* Terms & Conditions / Regulatory Disclaimers */}
+              <div className="bg-white border border-[#e5e8df] rounded-xl p-4 space-y-2 text-[10px] text-slate-600 leading-relaxed">
+                <h4 className="font-bold uppercase tracking-wider text-brand-text flex items-center gap-1.5 text-[11px]">
+                  <Scale className="w-3.5 h-3.5 text-slate-700" /> Important Disclaimer & Notes
+                </h4>
+                <ul className="list-disc list-inside space-y-1.5 font-medium">
+                  <li><strong>Unofficial Sample Document:</strong> This illustration is not an official document. It is prepared solely for educational, training, and sales pitching purposes for better understanding.</li>
+                  <li><strong>Indicative Calculations:</strong> Premium amounts, maturity values, surrender values, and benefit figures are calculated from the current actuarial certificate tables. If any figure differs from your issued policy document, the policy document will prevail.</li>
+                  <li><strong>Official Verification:</strong> Final policy issuance, actual premium rates, and coverage terms will strictly be determined according to the official Shanta Life Insurance website calculator and company underwriting policies.</li>
+                  <li><strong>Tax Rebates:</strong> Tax benefits and rebates are subject to the Income Tax Act of Bangladesh and applicable National Board of Revenue (NBR) rules.</li>
+                </ul>
+              </div>
+              </div>
+
+              {/* Footer Notice */}
+              <div className="text-center text-[9px] text-slate-400 font-mono pt-4 border-t border-[#e5e8df]">
+                Generated via T&D Team PremiumPulse Engine • Sample Proposal Document
+              </div>
+
             </div>
-
-            {/* Terms & Conditions / Regulatory Disclaimers */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-[10px] text-slate-600 leading-relaxed">
-              <h4 className="font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5 text-[11px]">
-                <Scale className="w-3.5 h-3.5 text-slate-700" /> Important Disclaimer & Notes
-              </h4>
-              <ul className="list-disc list-inside space-y-1.5 font-medium">
-                <li><strong>Unofficial Sample Document:</strong> This illustration is not an official document. It is prepared solely for educational, training, and sales pitching purposes for better understanding.</li>
-                <li><strong>Indicative Calculations:</strong> Premium amounts, maturity values, surrender values, and benefit figures are calculated from the current actuarial certificate tables. If any figure differs from your issued policy document, the policy document will prevail.</li>
-                <li><strong>Official Verification:</strong> Final policy issuance, actual premium rates, and coverage terms will strictly be determined according to the official Shanta Life Insurance website calculator and company underwriting policies.</li>
-                <li><strong>Tax Rebates:</strong> Tax benefits and rebates are subject to the Income Tax Act of Bangladesh and applicable National Board of Revenue (NBR) rules.</li>
-              </ul>
-            </div>
-
-            {/* Footer Notice */}
-            <div className="text-center text-[9px] text-slate-400 font-mono pt-4 border-t border-slate-100">
-              Generated via T&D Team PremiumPulse Engine • Sample Proposal Document
-            </div>
-
-          </div>
           )}
+
+          {/* Print / download actions — at the very end of the preview, after
+              all content (every layout: standard, SDPP, combo). Buttons and
+              behaviour are unchanged, only the position moved. */}
+          <div className={cn("print:hidden mx-auto w-full", (isComboEnabled || isSDPP) ? "max-w-[800px]" : "")}>
+            <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-slate-600" role="status" aria-live="polite">
+                  {isGeneratingPdf ? 'Preparing your personalized A4 quotation…' : 'PDF download includes a clean, print-ready summary, benefit details and available policy projections.'}
+                </p>
+                {pdfError && <p role="alert" className="mt-2 text-sm text-red-700">{pdfError} You can retry using Download PDF.</p>}
+              </div>
+              <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+                <button
+                  title="Print quotation" aria-label="Print quotation"
+                  onClick={handlePrint}
+                  className="px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-slate-300" />
+                  <span className="hidden sm:inline">Print</span>
+                </button>
+                <button
+                  title="Download PDF" aria-label={isGeneratingPdf ? "Generating quotation PDF" : "Download PDF"} aria-busy={isGeneratingPdf}
+                  onClick={handleDownloadPdf}
+                  disabled={isGeneratingPdf}
+                  className="px-4 py-2.5 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-brand-primary/20 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isGeneratingPdf ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span className="hidden sm:inline">Generating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4" />
+                      <span className="hidden sm:inline">Download PDF</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
 
         </div>
       </div>
