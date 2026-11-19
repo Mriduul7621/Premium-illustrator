@@ -142,13 +142,16 @@
 }
 @media print { .sdpp-app :is(.shadow-2xl,.shadow-xl) { box-shadow:none!important; } }
 
-/* Opening screen only: subtle watermark, with separate desktop/mobile artwork. */
+/* Opening screen only: subtle watermark, with separate desktop/mobile artwork.
+   The artwork URLs come from CSS variables set on the home element in
+   Calculator.tsx (Vite-bundled imports of the repo's own files), so the
+   landing no longer depends on an externally hotlinked copy. */
 .premium-home-bg::before {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background-image: url("https://raw.githubusercontent.com/mriduultnd/PremiumPulse-SDPP-Redesign/main/Premium%20Pulse%20Laptop%20BG.jpg");
+  background-image: var(--home-bg-desktop);
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
@@ -156,7 +159,7 @@
 }
 @media (max-width: 639px) {
   .premium-home-bg::before {
-    background-image: url("https://raw.githubusercontent.com/mriduultnd/PremiumPulse-SDPP-Redesign/main/Premium%20Pulse%20Mobile%20App%20BG.jpg");
+    background-image: var(--home-bg-mobile);
     background-position: center top;
     background-size: 100% auto;
     opacity: 0.19;
