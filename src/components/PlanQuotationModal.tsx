@@ -18,6 +18,7 @@ interface PlanQuotationModalProps {
   showProjection?: boolean;
   onViewDiseases?: (type: 'classic' | 'standard') => void;
   onViewPremiumBreakdown?: () => void;
+  onViewModeComparison?: () => void;
   input: CalculationInput;
   selectedProduct?: CalculationResult;
   sdppData?: SDPPResult;
@@ -37,6 +38,7 @@ export default function PlanQuotationModal({
   showProjection = true,
   onViewDiseases,
   onViewPremiumBreakdown,
+  onViewModeComparison,
   input,
   selectedProduct,
   sdppData,
@@ -116,12 +118,13 @@ export default function PlanQuotationModal({
     : 0;
   const standardAdb = input.hasAccidentalProtection ? accidentalRiderBenefits(input.sumAssured) : null;
 
-  // Section numbers run in order for what is actually shown: the mode
-  // comparison exists only when the plan offers more than one mode, so the
-  // benefits and projection sections shift up by one for single-premium plans.
+  // The mode comparison lives behind the Compare button now, so the visible
+  // sections are always numbered in order: 1 summary, 2 benefits, 3
+  // projection. The Compare button itself only shows when the plan offers
+  // more than one mode (single-premium plans have nothing to compare).
   const standardHasModes = standardModeRows.length > 1;
-  const standardBenefitsNum = standardHasModes ? 3 : 2;
-  const standardProjectionNum = standardHasModes ? 4 : 3;
+  const standardBenefitsNum = 2;
+  const standardProjectionNum = 3;
 
   // Target Sum Assured calculation
   const calculatedSdppSa = typeof sdppData?.deathBenefit === 'number' 
@@ -237,52 +240,20 @@ export default function PlanQuotationModal({
     <div className={embedded ? "w-full flex justify-center print:block" : "fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 print:p-0 print:bg-white print:fixed print:inset-0"}>
       <div className={embedded ? "w-full min-w-0 flex flex-col bg-slate-100 print:bg-white" : "bg-white rounded-2xl md:rounded-3xl shadow-2xl max-w-7xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200 print:max-h-none print:shadow-none print:border-none print:rounded-none print:w-full"}>
         
-        {/* Modal Action Header (Hidden when printing) */}
-        <div className={cn("bg-slate-900 text-white p-3 md:px-8 flex items-center justify-end border-b border-slate-800 print:hidden flex-shrink-0", embedded && "bg-white border-[#e5e8df]")}>
-          <div className="flex items-center gap-1.5 sm:gap-3">
-            <button
-              title="Print quotation" aria-label="Print quotation"
-              onClick={handlePrint}
-              className="px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer"
-            >
-              <Printer className="w-4 h-4 text-slate-300" />
-              <span className="hidden sm:inline">Print</span>
-            </button>
-
-            <button
-              title="Download PDF" aria-label={isGeneratingPdf ? "Generating quotation PDF" : "Download PDF"} aria-busy={isGeneratingPdf}
-              onClick={handleDownloadPdf}
-              disabled={isGeneratingPdf}
-              className="px-4 py-2.5 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-brand-primary/20 transition-all cursor-pointer disabled:opacity-50"
-            >
-              {isGeneratingPdf ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span className="hidden sm:inline">Generating...</span>
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4" />
-                  <span className="hidden sm:inline">Download PDF</span>
-                </>
-              )}
-            </button>
-
+        {/* Modal close only (dialog mode). Print / Download PDF live at the
+            very end of the preview now, after all content — a button bar
+            between the summary and the content split the page in two. */}
+        {!embedded && (
+          <div className="bg-slate-900 text-white p-3 md:px-8 flex items-center justify-end border-b border-slate-800 print:hidden flex-shrink-0">
             <button
               onClick={onClose}
-              className={cn("w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer ml-2", embedded && "hidden")}
+              title="Close" aria-label="Close quotation"
+              className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
-        </div>
-
-        <div className="print:hidden bg-white px-4 py-3 border-b border-slate-200">
-          <p className="text-xs text-slate-600" role="status" aria-live="polite">
-            {isGeneratingPdf ? 'Preparing your personalized A4 quotation…' : 'PDF download includes a clean, print-ready summary, benefit details and available policy projections.'}
-          </p>
-          {pdfError && <p role="alert" className="mt-2 text-sm text-red-700">{pdfError} You can retry using Download PDF.</p>}
-        </div>
+        )}
 
         {/* Document Scroll Area */}
         <div ref={documentAreaRef} className={cn("overflow-auto p-3 sm:p-6 space-y-8 print:p-0 print:overflow-visible text-slate-800 font-sans", embedded && "w-full", (isComboEnabled || isSDPP) ? "bg-slate-100" : "bg-[#f7f8ef]")} id={embedded ? "quotation-document-inline" : "quotation-document"} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd} style={{ touchAction: "pan-x pan-y" }}>
@@ -1312,7 +1283,7 @@ export default function PlanQuotationModal({
             <div
               data-quotation-content="true"
               data-page="1"
-              className="w-full max-w-[800px] mx-auto space-y-4 sm:space-y-6"
+              className="w-full space-y-4 sm:space-y-6"
             >
               {/* Slim heading — product + term only */}
               <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5">
@@ -1323,9 +1294,10 @@ export default function PlanQuotationModal({
                 <p className="mt-1 text-[11px] text-slate-400">Unofficial sample illustration</p>
               </div>
               {/* Redesigned standard quotation — single non-SDPP policy.
-                  Order: 1. selected plan summary, 2. payment-mode comparison,
-                  3. core benefits (survival, death, riders). Combo and SDPP
-                  keep the existing layouts above. */}
+                  Order: 1. selected plan summary (Breakdown and Compare open
+                  their dialogs from the premium tile), 2. core benefits
+                  (survival, death, riders). Combo and SDPP keep the existing
+                  layouts above. */}
               <div className="space-y-4 sm:space-y-6">
                 {/* 1. Your plan at a glance — selected product + selected mode */}
                 <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-3">
@@ -1338,8 +1310,15 @@ export default function PlanQuotationModal({
                       <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{input.paymentMethod} premium</div>
                       <div className="mt-1 font-mono text-base font-black text-brand-text">{formatCurrency(selectedProduct?.totalPremium?.[input.paymentMethod] || 0)}</div>
                       <div className="mt-0.5 text-[10px] text-slate-500">per payment</div>
-                      {onViewPremiumBreakdown && (
-                        <button type="button" onClick={onViewPremiumBreakdown} className="mt-1 text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">Breakdown →</button>
+                      {(onViewPremiumBreakdown || (onViewModeComparison && standardHasModes)) && (
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                          {onViewPremiumBreakdown && (
+                            <button type="button" onClick={onViewPremiumBreakdown} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">Breakdown →</button>
+                          )}
+                          {onViewModeComparison && standardHasModes && (
+                            <button type="button" onClick={onViewModeComparison} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">Compare →</button>
+                          )}
+                        </div>
                       )}
                     </div>
                     <div className="rounded-xl border border-[#e5e8df] bg-white p-3">
@@ -1360,51 +1339,15 @@ export default function PlanQuotationModal({
                   </div>
                 </div>
 
-                {/* 2. Compare payment modes — same cover, different totals.
-                    Single-premium plans offer one mode only, so there is
-                    nothing to compare and this section stays hidden. */}
-                {standardModeRows.length > 1 && (
-                  <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-3 print:break-inside-avoid">
-                    <h3 className="text-xs font-black uppercase tracking-wider text-brand-text border-b-2 border-brand-primary/40 pb-2">
-                      2. Compare Payment Modes
-                    </h3>
-                    <div className="overflow-x-auto border border-[#e5e8df] rounded-xl">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="bg-[#f0f1df] text-brand-text font-bold text-[10px] uppercase tracking-wider">
-                            <th className="p-3 border-r border-[#e5e8df]">Payment mode</th>
-                            <th className="p-3 border-r border-[#e5e8df] text-right">Premium per payment</th>
-                            <th className="p-3 border-r border-[#e5e8df] text-right">Total paid over {input.term} years</th>
-                            <th className="p-3 border-r border-[#e5e8df] text-right">Maturity payout</th>
-                            <th className="p-3 text-right">Death cover</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#e5e8df]">
-                          {standardModeRows.map((row) => (
-                            <tr key={row.mode} className={cn('hover:bg-[#f7f8ef]', row.selected && 'bg-brand-primary/10 font-bold')}>
-                              <td className="p-3 border-r border-[#e5e8df] font-bold text-brand-text">
-                                {row.mode}
-                                {row.selected && <span className="ml-2 bg-brand-primary text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-full">Selected</span>}
-                              </td>
-                              <td className="p-3 border-r border-[#e5e8df] text-right font-mono">{formatCurrency(row.premium)}</td>
-                              <td className="p-3 border-r border-[#e5e8df] text-right font-mono font-bold text-brand-text">{formatCurrency(row.totalPaid)}</td>
-                              <td className="p-3 border-r border-[#e5e8df] text-right font-mono">{formatCurrency(row.maturity)}</td>
-                              <td className="p-3 text-right font-mono">{formatCurrency(row.deathCover)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <p className="text-[11px] text-slate-500">Total paid is that mode's premium multiplied by the number of payments over the full term. Maturity payout and death cover are the same in every mode — only what you pay changes.</p>
-                  </div>
-                )}
-
-                {/* 3. Core benefits */}
+                {/* 2. Core benefits */}
                 <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-4">
                   <h3 className="text-xs font-black uppercase tracking-wider text-brand-text border-b-2 border-brand-primary/40 pb-2">
                     {standardBenefitsNum}. Core Benefits
                   </h3>
 
+                  {/* Survival and death panels sit side by side on wider screens
+                      (they stack on mobile) so the full-width layout reads well. */}
+                  <div className="grid gap-4 md:grid-cols-2">
                   {/* Survival benefits — what you receive while alive */}
                   <div className="bg-[#f7f8ef] border border-[#e5e8df] rounded-xl p-4 space-y-3">
                     <h4 className="text-xs font-black uppercase text-brand-text flex items-center gap-2">
@@ -1478,6 +1421,7 @@ export default function PlanQuotationModal({
                         <p className="text-[11px] text-slate-500">Future premiums are waived — subject to covered event and policy terms.</p>
                       </div>
                     )}
+                  </div>
                   </div>
 
                   {/* Rider benefits — only the riders actually selected */}
@@ -1603,6 +1547,8 @@ export default function PlanQuotationModal({
                   </div>
                 </div>
               )}
+              {/* Good to know + disclaimer sit side by side on wider screens. */}
+              <div className="grid gap-4 lg:grid-cols-2">
               {/* Good to know before you decide */}
               <div className="bg-[#f7f8ef] border border-brand-primary/30 rounded-xl p-4 space-y-2 text-[10px] text-slate-700 leading-relaxed">
                 <h4 className="font-bold uppercase tracking-wider text-brand-text text-[11px]">Good to know before you decide</h4>
@@ -1628,6 +1574,7 @@ export default function PlanQuotationModal({
                   <li><strong>Tax Rebates:</strong> Tax benefits and rebates are subject to the Income Tax Act of Bangladesh and applicable National Board of Revenue (NBR) rules.</li>
                 </ul>
               </div>
+              </div>
 
               {/* Footer Notice */}
               <div className="text-center text-[9px] text-slate-400 font-mono pt-4 border-t border-[#e5e8df]">
@@ -1636,6 +1583,48 @@ export default function PlanQuotationModal({
 
             </div>
           )}
+
+          {/* Print / download actions — at the very end of the preview, after
+              all content (every layout: standard, SDPP, combo). Buttons and
+              behaviour are unchanged, only the position moved. */}
+          <div className={cn("print:hidden mx-auto w-full", (isComboEnabled || isSDPP) ? "max-w-[800px]" : "")}>
+            <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-slate-600" role="status" aria-live="polite">
+                  {isGeneratingPdf ? 'Preparing your personalized A4 quotation…' : 'PDF download includes a clean, print-ready summary, benefit details and available policy projections.'}
+                </p>
+                {pdfError && <p role="alert" className="mt-2 text-sm text-red-700">{pdfError} You can retry using Download PDF.</p>}
+              </div>
+              <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+                <button
+                  title="Print quotation" aria-label="Print quotation"
+                  onClick={handlePrint}
+                  className="px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-slate-300" />
+                  <span className="hidden sm:inline">Print</span>
+                </button>
+                <button
+                  title="Download PDF" aria-label={isGeneratingPdf ? "Generating quotation PDF" : "Download PDF"} aria-busy={isGeneratingPdf}
+                  onClick={handleDownloadPdf}
+                  disabled={isGeneratingPdf}
+                  className="px-4 py-2.5 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-brand-primary/20 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isGeneratingPdf ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span className="hidden sm:inline">Generating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4" />
+                      <span className="hidden sm:inline">Download PDF</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
 
         </div>
       </div>
