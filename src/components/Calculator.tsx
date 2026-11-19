@@ -22,6 +22,8 @@ import PremiumBreakdownModal from './PremiumBreakdownModal';
 import ModeComparisonModal from './ModeComparisonModal';
 import CriticalIllnessDialog from './CriticalIllnessDialog';
 import TermComparisonModal from './TermComparisonModal';
+import homeBgDesktop from '../../Premium Pulse Laptop BG.jpg';
+import homeBgMobile from '../../Premium Pulse Mobile App BG.jpg';
 
 const FREQUENCIES: PlanFrequency[] = ['Monthly', 'Quarterly', 'Half-yearly', 'Yearly', 'Single'];
 const GENDERS: Gender[] = ['Male', 'Female'];
@@ -608,7 +610,10 @@ export default function Calculator() {
 
   // Sub-renderers
   const renderHome = () => (
-    <div className="premium-home-bg relative min-h-[calc(100dvh-76px)] w-full overflow-hidden bg-[#f7f8ef]">
+    <div
+      className="premium-home-bg relative min-h-[calc(100dvh-76px)] w-full overflow-hidden bg-[#f7f8ef]"
+      style={{ '--home-bg-desktop': `url(${homeBgDesktop})`, '--home-bg-mobile': `url(${homeBgMobile})` } as React.CSSProperties}
+    >
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}

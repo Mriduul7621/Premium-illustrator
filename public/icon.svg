@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="PremiumPulse">
+  <title>PremiumPulse</title>
+  <!-- PremiumPulse app icon: shield (life-insurance protection) + pulse line (the "Pulse"),
+       Shanta Life palette — Olive #978C21, Sunset Orange #F37021, canvas cream #F7F2E9.
+       The orange node at the pulse peak echoes the orange dot of the Shanta Life wordmark. -->
+  <rect width="512" height="512" rx="112" fill="#978C21"/>
+  <path d="M256 92 C296 112 340 124 384 132 V252 C384 336 330 396 256 424 C182 396 128 336 128 252 V132 C172 124 216 112 256 92 Z" fill="#F7F2E9"/>
+  <polyline points="168,272 212,272 236,214 280,330 304,272 344,272" fill="none" stroke="#978C21" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="236" cy="214" r="21" fill="#F37021"/>
+</svg>

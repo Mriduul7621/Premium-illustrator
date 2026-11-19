@@ -1,9 +1,5 @@
-const CACHE = 'premium-pulse-offline-v3';
-const APP_SHELL = ['/', '/index.html', '/shanta-life-logo.png', '/premium-pulse-app-icon.png', '/manifest.webmanifest', '/fonts/NotoSansBengali.ttf'];
-const EXTERNAL_ARTWORK = [
-  'https://raw.githubusercontent.com/mriduultnd/PremiumPulse-SDPP-Redesign/main/Premium%20Pulse%20Laptop%20BG.jpg',
-  'https://raw.githubusercontent.com/mriduultnd/PremiumPulse-SDPP-Redesign/main/Premium%20Pulse%20Mobile%20App%20BG.jpg'
-];
+const CACHE = 'premium-pulse-offline-v4';
+const APP_SHELL = ['/', '/index.html', '/shanta-life-logo.png', '/icon.svg', '/manifest.webmanifest', '/fonts/NotoSansBengali.ttf'];
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
@@ -14,10 +10,6 @@ self.addEventListener('install', event => {
     await cache.put('/index.html', response.clone());
     await cache.put('/', response);
     await cache.addAll([...new Set([...APP_SHELL.slice(2), ...assets])]);
-    await Promise.allSettled(EXTERNAL_ARTWORK.map(async url => {
-      const artwork = await fetch(url, { mode: 'no-cors' });
-      await cache.put(url, artwork);
-    }));
     await self.skipWaiting();
   })());
 });
@@ -33,8 +25,7 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   const sameOrigin = url.origin === self.location.origin;
-  const artwork = EXTERNAL_ARTWORK.includes(url.href);
-  if (!sameOrigin && !artwork) return;
+  if (!sameOrigin) return;
   if (request.mode === 'navigate' && sameOrigin) {
     event.respondWith((async () => {
       try {
