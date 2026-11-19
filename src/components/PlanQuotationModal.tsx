@@ -8,6 +8,8 @@ import {
 import { cn, formatCurrency } from '../lib/utils';
 import { CalculationInput, CalculationResult, SDPPResult, ProjectionRow } from '../data/types';
 import { createQuotationPdf, quotationFilename } from '../lib/quotationPdf';
+import { accidentalRiderBenefits, modeComparisonRows, naturalDeathCover, paymentsOverTerm, scepStipend, stagePayouts } from '../lib/quotationPreview';
+import { CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR, CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR, CI_MINOR_BENEFIT_SHARE, ciCoverageAmount, isCiRiderEligible } from '../data/ciDiseases';
 
 interface PlanQuotationModalProps {
   isOpen: boolean;
@@ -100,6 +102,18 @@ export default function PlanQuotationModal({
      input.paymentMethod === 'Monthly' ? input.term * 12 : 1);
 
   const primaryMaturity = selectedProduct?.maturityValue || input.sumAssured;
+
+  // Redesigned standard quotation preview (single non-SDPP policy only).
+  // Every value below comes from the engine result or the shared quotation
+  // rules; see src/lib/quotationPreview.ts.
+  const standardDeathCover = selectedProduct ? naturalDeathCover(selectedProduct, input.sumAssured) : input.sumAssured;
+  const standardModeRows = selectedProduct ? modeComparisonRows(selectedProduct, input.term, primaryMaturity, standardDeathCover, input.paymentMethod) : [];
+  const standardStages = selectedProduct ? stagePayouts(selectedProduct.productId, input.term, input.sumAssured, issueYear) : [];
+  const standardStipend = selectedProduct ? scepStipend(selectedProduct.productId, input.sumAssured) : null;
+  const standardCiCoverage = (input.hasCIClassic || input.hasCIStandard) && isCiRiderEligible(input.sumAssured)
+    ? (input.ciCoverage || ciCoverageAmount(input.sumAssured))
+    : 0;
+  const standardAdb = input.hasAccidentalProtection ? accidentalRiderBenefits(input.sumAssured) : null;
 
   // Target Sum Assured calculation
   const calculatedSdppSa = typeof sdppData?.deathBenefit === 'number' 
@@ -746,9 +760,9 @@ export default function PlanQuotationModal({
                 </div>
 
               </div>
-            ) : (
+            ) : isSDPP ? (
               <>
-                {/* Standard Single Policy Layout */}
+                {/* Standard Single Policy Layout — SDPP keeps the existing layout */}
                 <div className="space-y-3">
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-200 pb-2 flex items-center justify-between">
                     <span>1. Premium Commitment & Deposit Summary</span>
@@ -1243,6 +1257,267 @@ export default function PlanQuotationModal({
                   </div>
                 </div>
               </>
+            ) : (
+              <>
+                {/* Redesigned standard quotation — single non-SDPP policy.
+                    Order: 1. selected plan summary, 2. payment-mode comparison,
+                    3. core benefits (survival, death, riders). Combo and SDPP
+                    keep the existing layouts above. */}
+                <div className="space-y-6">
+                  {/* 1. Your plan at a glance — selected product + selected mode */}
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-200 pb-2 flex items-center justify-between">
+                      <span>1. Your Plan at a Glance</span>
+                      <span className="text-[10px] font-mono text-slate-500">All amounts in BDT (৳)</span>
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{input.paymentMethod} premium</div>
+                        <div className="mt-1 font-mono text-base font-black text-slate-900">{formatCurrency(selectedProduct?.totalPremium?.[input.paymentMethod] || 0)}</div>
+                        <div className="mt-0.5 text-[10px] text-slate-500">per payment</div>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Total premium paid</div>
+                        <div className="mt-1 font-mono text-base font-black text-slate-900">{formatCurrency(primaryPaid)}</div>
+                        <div className="mt-0.5 text-[10px] text-slate-500">over {input.term} years</div>
+                      </div>
+                      <div className="rounded-xl border border-brand-primary/40 bg-[#F9FAF3] p-3">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Maturity payout</div>
+                        <div className="mt-1 font-mono text-base font-black text-brand-primary">{formatCurrency(primaryMaturity)}</div>
+                        <div className="mt-0.5 text-[10px] text-slate-500">{standardStages.length > 0 ? `in ${standardStages.length} stage payouts` : `at year ${input.term} (${issueYear + input.term})`}</div>
+                      </div>
+                      <div className="rounded-xl border border-brand-primary/40 bg-[#F9FAF3] p-3">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Death cover</div>
+                        <div className="mt-1 font-mono text-base font-black text-brand-primary">{formatCurrency(standardDeathCover)}</div>
+                        <div className="mt-0.5 text-[10px] text-slate-500">paid to your nominee</div>
+                      </div>
+                    </div>
+
+                    {/* What the selected premium is made of */}
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="bg-slate-900 text-white font-bold text-[10px] uppercase tracking-wider">
+                            <th className="p-3 border-r border-slate-800">What your premium includes</th>
+                            <th className="p-3 border-r border-slate-800 text-right">Per payment ({input.paymentMethod})</th>
+                            <th className="p-3 text-right">Total over {input.term} years</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          <tr className="hover:bg-slate-50">
+                            <td className="p-3 border-r border-slate-200 font-bold text-slate-900">Basic policy ({selectedProduct?.productName || 'Primary Plan'})</td>
+                            <td className="p-3 border-r border-slate-200 text-right font-mono font-bold">{formatCurrency(selectedProduct?.basePremium?.[input.paymentMethod] || 0)}</td>
+                            <td className="p-3 text-right font-mono font-bold text-slate-900">{formatCurrency((selectedProduct?.basePremium?.[input.paymentMethod] || 0) * paymentsOverTerm(input.paymentMethod, input.term))}</td>
+                          </tr>
+                          {input.hasAccidentalProtection && (
+                            <tr className="hover:bg-slate-50">
+                              <td className="p-3 border-r border-slate-200 font-semibold text-slate-800">Accidental Protection rider</td>
+                              <td className="p-3 border-r border-slate-200 text-right font-mono font-bold">{formatCurrency(selectedProduct?.adbPremium?.[input.paymentMethod] || 0)}</td>
+                              <td className="p-3 text-right font-mono font-bold text-slate-900">{formatCurrency((selectedProduct?.adbPremium?.[input.paymentMethod] || 0) * paymentsOverTerm(input.paymentMethod, input.term))}</td>
+                            </tr>
+                          )}
+                          {input.hasCIClassic && (
+                            <tr className="hover:bg-slate-50">
+                              <td className="p-3 border-r border-slate-200 font-semibold text-slate-800">Critical Illness — Classic rider</td>
+                              <td className="p-3 border-r border-slate-200 text-right font-mono font-bold">{formatCurrency(selectedProduct?.ciClassicPremium?.[input.paymentMethod] || 0)}</td>
+                              <td className="p-3 text-right font-mono font-bold text-slate-900">{formatCurrency((selectedProduct?.ciClassicPremium?.[input.paymentMethod] || 0) * paymentsOverTerm(input.paymentMethod, input.term))}</td>
+                            </tr>
+                          )}
+                          {input.hasCIStandard && (
+                            <tr className="hover:bg-slate-50">
+                              <td className="p-3 border-r border-slate-200 font-semibold text-slate-800">Critical Illness — Standard rider</td>
+                              <td className="p-3 border-r border-slate-200 text-right font-mono font-bold">{formatCurrency(selectedProduct?.ciStandardPremium?.[input.paymentMethod] || 0)}</td>
+                              <td className="p-3 text-right font-mono font-bold text-slate-900">{formatCurrency((selectedProduct?.ciStandardPremium?.[input.paymentMethod] || 0) * paymentsOverTerm(input.paymentMethod, input.term))}</td>
+                            </tr>
+                          )}
+                          <tr className="bg-slate-100 font-black text-slate-900">
+                            <td className="p-3 border-r border-slate-200 uppercase text-[10px] tracking-wider text-slate-700">Total payable</td>
+                            <td className="p-3 border-r border-slate-200 text-right font-mono">{formatCurrency(selectedProduct?.totalPremium?.[input.paymentMethod] || 0)}</td>
+                            <td className="p-3 text-right font-mono text-base text-brand-primary">{formatCurrency(primaryPaid)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* 2. Compare payment modes — same cover, different totals.
+                      Single-premium plans offer one mode only, so there is
+                      nothing to compare and this section stays hidden. */}
+                  {standardModeRows.length > 1 && (
+                    <div className="space-y-3 print:break-inside-avoid">
+                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-200 pb-2">
+                        2. Compare Payment Modes
+                      </h3>
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-slate-900 text-white font-bold text-[10px] uppercase tracking-wider">
+                              <th className="p-3 border-r border-slate-800">Payment mode</th>
+                              <th className="p-3 border-r border-slate-800 text-right">Premium per payment</th>
+                              <th className="p-3 border-r border-slate-800 text-right">Total paid over {input.term} years</th>
+                              <th className="p-3 border-r border-slate-800 text-right">Maturity payout</th>
+                              <th className="p-3 text-right">Death cover</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200">
+                            {standardModeRows.map((row) => (
+                              <tr key={row.mode} className={cn('hover:bg-slate-50', row.selected && 'bg-brand-primary/10 font-bold')}>
+                                <td className="p-3 border-r border-slate-200 font-bold text-slate-900">
+                                  {row.mode}
+                                  {row.selected && <span className="ml-2 bg-brand-primary text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-full">Selected</span>}
+                                </td>
+                                <td className="p-3 border-r border-slate-200 text-right font-mono">{formatCurrency(row.premium)}</td>
+                                <td className="p-3 border-r border-slate-200 text-right font-mono font-bold text-slate-900">{formatCurrency(row.totalPaid)}</td>
+                                <td className="p-3 border-r border-slate-200 text-right font-mono">{formatCurrency(row.maturity)}</td>
+                                <td className="p-3 text-right font-mono">{formatCurrency(row.deathCover)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="text-[11px] text-slate-500">Total paid is that mode's premium multiplied by the number of payments over the full term. Maturity payout and death cover are the same in every mode — only what you pay changes.</p>
+                    </div>
+                  )}
+
+                  {/* 3. Core benefits */}
+                  <div className="space-y-4">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-200 pb-2">
+                      3. Core Benefits
+                    </h3>
+
+                    {/* Survival benefits — what you receive while alive */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                      <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-brand-primary" /> If you stay alive — survival benefits
+                      </h4>
+                      {standardStages.length > 0 ? (
+                        <div className="space-y-2">
+                          <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
+                            <table className="w-full text-left text-xs border-collapse">
+                              <thead>
+                                <tr className="bg-slate-100 font-bold text-[10px] uppercase tracking-wider text-slate-700">
+                                  <th className="p-2.5 border-r border-slate-200">Payout</th>
+                                  <th className="p-2.5 border-r border-slate-200 text-center">Policy year</th>
+                                  <th className="p-2.5 border-r border-slate-200 text-center">Calendar year</th>
+                                  <th className="p-2.5 text-right">Amount</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-200">
+                                {standardStages.map((stage) => (
+                                  <tr key={stage.label} className="hover:bg-slate-50">
+                                    <td className="p-2.5 border-r border-slate-200 font-bold text-slate-900">{stage.label} ({stage.percent}%)</td>
+                                    <td className="p-2.5 border-r border-slate-200 text-center font-mono">Year {stage.policyYear}</td>
+                                    <td className="p-2.5 border-r border-slate-200 text-center font-mono">{stage.calendarYear}</td>
+                                    <td className="p-2.5 text-right font-mono font-bold text-slate-900">{formatCurrency(stage.amount)}</td>
+                                  </tr>
+                                ))}
+                                <tr className="bg-slate-100 font-black text-slate-900">
+                                  <td colSpan={3} className="p-2.5 border-r border-slate-200 uppercase text-[10px] tracking-wider">Total you will receive</td>
+                                  <td className="p-2.5 text-right font-mono text-brand-primary">{formatCurrency(input.sumAssured)}</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                          <p className="text-[11px] text-slate-500">Stage payouts are part of the full sum assured — not additional to it.</p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                          <div>
+                            <div className="text-xs font-bold text-slate-900">Maturity payout — Year {input.term} ({issueYear + input.term})</div>
+                            {isChildPlan && <div className="text-[11px] text-slate-500">Paid at maturity even after the stipend starts.</div>}
+                          </div>
+                          <div className="font-mono font-black text-base text-brand-primary text-right">{formatCurrency(primaryMaturity)}</div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Death benefits — including the Child Education stipend story */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                      <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-2">
+                        <Shield className="w-4 h-4 text-brand-primary" /> If the policyholder dies
+                      </h4>
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div className="text-xs font-bold text-slate-900">Death cover — paid to your nominee</div>
+                        <div className="font-mono font-black text-base text-slate-900 text-right">{formatCurrency(standardDeathCover)}</div>
+                      </div>
+                      {isChildPlan && standardStipend && (
+                        <div className="space-y-2 pt-2 border-t border-slate-200">
+                          <div className="rounded-lg border-2 border-[#F37021] bg-[#FFF4ED] p-3 space-y-1">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                              <div>
+                                <div className="text-xs font-black uppercase text-slate-900">Monthly education stipend — {Math.round(standardStipend.percent * 100)}% of sum assured</div>
+                                <div className="text-[11px] text-slate-600">Paid every month until maturity, so your child's education continues.</div>
+                              </div>
+                              <div className="font-mono font-black text-base text-slate-900 text-right whitespace-nowrap">{formatCurrency(standardStipend.monthly)} <span className="text-xs font-bold">/ month</span></div>
+                            </div>
+                          </div>
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs">
+                            <div className="font-bold text-slate-900">At maturity — full sum assured again</div>
+                            <div className="font-mono font-black text-slate-900 text-right">{formatCurrency(input.sumAssured)}</div>
+                          </div>
+                          <p className="text-[11px] text-slate-500">Future premiums are waived — subject to covered event and policy terms.</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Rider benefits — only the riders actually selected */}
+                    {(standardAdb || standardCiCoverage > 0) && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
+                        <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-2">
+                          <Activity className="w-4 h-4 text-brand-primary" /> Your riders
+                        </h4>
+                        {standardAdb && (
+                          <div className="space-y-2">
+                            <div className="text-[11px] font-black uppercase tracking-wider text-slate-700">Accidental Protection rider</div>
+                            <div className="space-y-1.5 text-xs">
+                              <div className="flex justify-between items-center gap-2">
+                                <span className="text-slate-700">Accidental death cover (total, including base cover)</span>
+                                <span className="font-mono font-bold text-slate-900 text-right">{formatCurrency(standardAdb.deathCoverTotal)}</span>
+                              </div>
+                              <div className="flex justify-between items-center gap-2">
+                                <span className="text-slate-700">Permanent total / partial disability — each</span>
+                                <span className="font-mono font-bold text-slate-900 text-right">{formatCurrency(standardAdb.disabilityEach)}</span>
+                              </div>
+                              <div className="flex justify-between items-center gap-2">
+                                <span className="text-slate-700">Accidental medical reimbursement — up to</span>
+                                <span className="font-mono font-bold text-slate-900 text-right">{formatCurrency(standardAdb.medicalReimbursementMax)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {standardCiCoverage > 0 && (
+                          <div className="space-y-2 pt-3 border-t border-slate-200">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="text-[11px] font-black uppercase tracking-wider text-slate-700">Critical Illness — {input.hasCIClassic ? 'Classic' : 'Standard'} rider</div>
+                              {(input.hasCIClassic || input.hasCIStandard) && onViewDiseases && <button type="button" onClick={() => onViewDiseases(input.hasCIClassic ? 'classic' : 'standard')} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">View Diseases →</button>}
+                            </div>
+                            <div className="space-y-1.5 text-xs">
+                              <div className="flex justify-between items-center gap-2">
+                                <span className="text-slate-700">Critical illness coverage</span>
+                                <span className="font-mono font-bold text-slate-900 text-right">{formatCurrency(standardCiCoverage)}</span>
+                              </div>
+                              {input.hasCIClassic ? (
+                                <p className="text-[11px] text-slate-500">Every covered condition pays the full coverage amount.</p>
+                              ) : (
+                                <>
+                                  <div className="flex justify-between items-center gap-2">
+                                    <span className="text-slate-700">Minor condition — {Math.round(CI_MINOR_BENEFIT_SHARE * 100)}% of coverage</span>
+                                    <span className="font-mono font-bold text-slate-900 text-right">{formatCurrency(standardCiCoverage * CI_MINOR_BENEFIT_SHARE)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center gap-2">
+                                    <span className="text-slate-700">Major condition — {Math.round(CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR * 100)}% if no minor claimed, {Math.round(CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR * 100)}% if minor claimed</span>
+                                    <span className="font-mono font-bold text-slate-900 text-right">{formatCurrency(standardCiCoverage * CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR)} / {formatCurrency(standardCiCoverage * CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR)}</span>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
             )}
 
             {/* Disclaimer & Footer on Page 1 for Combo & SDPP Illustration */}
@@ -1305,7 +1580,7 @@ export default function PlanQuotationModal({
                 <div className="space-y-3">
                   <div className="flex items-center justify-between border-b-2 border-slate-200 pb-2">
                     <h3 className="text-xs font-black uppercase tracking-wider text-slate-900">
-                      3. Policy Value Projection Trajectory
+                      4. Policy Value Projection Trajectory
                     </h3>
                     <span className="text-[10px] text-slate-500 font-normal">
                       Illustrative schedule over {input.term} years
