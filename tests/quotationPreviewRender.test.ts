@@ -42,6 +42,18 @@ test('standard preview: summary and core benefits in order, with engine figures'
   assert.ok(html.includes('If you stay alive'));
   assert.ok(html.includes('If the policyholder dies'));
   assert.ok(!html.includes('Your riders'), 'no rider section when no rider is selected');
+  // Benefits use the three-part taxonomy: Survival first, Uncertainties only
+  // when a rider covers illness or accident, Death last.
+  assert.ok(html.includes('1. Survival Benefits'));
+  assert.ok(html.includes('3. Death Coverage'));
+  assert.ok(!html.includes('2. Uncertainties Coverage'), 'no uncertainties panel without riders');
+  // Tax rebate and hospital perk come with every policy.
+  assert.ok(html.includes('Tax rebate (10% of yearly premium)'));
+  assert.ok(html.includes(formatCurrency(8718)), 'rebate is 10% of the 87,178 yearly premium');
+  assert.ok(html.includes('Income Tax Act 2023 (Finance Act 2026)'));
+  assert.ok(html.includes('Lab test discount at partner hospitals'));
+  assert.ok(html.includes('Up to 40%'));
+  assert.ok(html.includes('View hospital list'));
   assert.ok(!html.includes('Premium Commitment &amp; Deposit Summary'), 'old premium table is replaced');
   assert.ok(!html.includes('Premium by Payment Frequency'), 'old frequency cards are replaced');
   // Print / Download live at the very end now, after all content.
@@ -62,7 +74,7 @@ test('standard preview: summary and core benefits in order, with engine figures'
   assert.ok(!html.includes('shanta-life-logo.png'), 'no logo block in the preview');
   // Full-width content: the narrow 800px column is gone, benefit panels pair up.
   assert.ok(!html.includes('max-w-[800px]'), 'standard content is no longer capped at 800px');
-  assert.ok(html.includes('md:grid-cols-2'), 'survival and death panels sit side by side on wider screens');
+  assert.ok(html.includes('md:grid-cols-2'), 'survival and uncertainties panels sit side by side on wider screens');
   assert.ok(html.includes('lg:grid-cols-2'), 'good-to-know and disclaimer sit side by side on wider screens');
   // The unofficial marking stays, as one subtle muted line — not the big badge.
   assert.ok(html.includes('Unofficial sample illustration'), 'unofficial note is kept');
@@ -99,18 +111,33 @@ test('standard preview: Child Education stipend is highlighted and the death sto
   assert.ok(html.includes(options.selectedProduct!.productName), 'slim heading shows the child plan name');
 });
 
-test('standard preview: selected riders show their benefits with amounts', () => {
+test('standard preview: selected riders sort into Uncertainties and Death parts', () => {
   const options = ciQuotationFixture('classic');
   options.input.hasAccidentalProtection = true;
   options.selectedProduct = calculatePremiums(options.input).find(result => result.productId === 'endowment')!;
   const html = renderPreview(options);
-  assert.ok(html.includes('Your riders'));
-  assert.ok(html.includes(formatCurrency(2880000)), 'accidental death cover total');
-  assert.ok(html.includes(formatCurrency(216000)), 'accidental medical reimbursement');
+  assert.ok(!html.includes('Your riders'), 'the old combined rider panel is gone');
+  const uncAt = html.indexOf('2. Uncertainties Coverage');
+  const deathAt = html.indexOf('3. Death Coverage');
+  assert.ok(uncAt > -1 && deathAt > uncAt, 'Uncertainties comes before Death');
+  // Critical illness lives in Uncertainties.
   assert.ok(html.includes('Critical Illness — Classic rider'));
+  const ciAt = html.indexOf('Critical Illness — Classic rider');
+  assert.ok(ciAt > uncAt && ciAt < deathAt, 'CI rider sits in Uncertainties');
   assert.ok(html.includes(formatCurrency(720000)), 'CI coverage is 50% of SA');
   assert.ok(html.includes('full coverage amount'));
+  // Accidental disability + medical live in Uncertainties; accidental death in Death.
+  const amrAt = html.indexOf(formatCurrency(216000));
+  assert.ok(amrAt > uncAt && amrAt < deathAt, 'accidental medical reimbursement sits in Uncertainties');
+  const adbAt = html.indexOf(formatCurrency(2880000));
+  assert.ok(adbAt > deathAt, 'accidental death cover total sits in Death');
   assert.ok(html.includes('Accidental Protection rider'));
+});
+
+test('standard preview: single-premium SSPE rebate is capped at 10% of the sum assured', () => {
+  const html = renderPreview(quotationFixture('sspe', 'Single', 10));
+  assert.ok(html.includes(formatCurrency(14400)), 'SSPE rebate is 10% of the 1,44,000 eligible premium (10% of SA cap)');
+  assert.ok(html.includes('https://shantalife.com/support#hospitals'), 'hospital list link is present');
 });
 
 test('standard preview: single-premium plans show no Compare button, and SSPE death cover is the maturity benefit', () => {
@@ -148,12 +175,20 @@ test('SDPP and combo previews keep the existing layout', () => {
   assert.ok(sdppHtml.includes('Client Profile Details'), 'SDPP keeps the client grid');
   assert.ok(sdppHtml.includes('Download PDF'), 'SDPP keeps the download button');
   assert.ok(sdppHtml.indexOf('Download PDF') > sdppHtml.indexOf('Premium Commitment &amp; Deposit Summary'), 'buttons sit at the end for SDPP too');
+  // SDPP uses the same three-part benefit taxonomy in its paper layout.
+  assert.ok(sdppHtml.includes('1. Survival Benefits'));
+  assert.ok(sdppHtml.includes('2. Uncertainties Coverage'));
+  assert.ok(sdppHtml.includes('3. Death Coverage'));
+  assert.ok(sdppHtml.includes('View hospital list'), 'SDPP shows the hospital perk too');
+  assert.ok(!sdppHtml.includes('Tax rebate (10% of yearly premium)'), 'no rebate line on SDPP deposits');
   const comboHtml = renderPreview(comboFixture());
   assert.ok(comboHtml.includes('COMBINED PREMIUM / DEPOSIT'));
   assert.ok(!comboHtml.includes('Your Plan at a Glance'));
   assert.ok(comboHtml.includes('Proposal Quotation Statement'), 'combo keeps the document banner');
   assert.ok(comboHtml.includes('Download PDF'), 'combo keeps the download button');
   assert.ok(comboHtml.indexOf('Download PDF') > comboHtml.indexOf('COMBINED PREMIUM / DEPOSIT'), 'buttons sit at the end for combo too');
+  assert.ok(comboHtml.includes('PARTNER HOSPITAL LAB TEST DISCOUNT'), 'combo shows the hospital perk too');
+  assert.ok(comboHtml.includes('Income Tax Act 2023 (Finance Act 2026)'), 'combo rebate cites the law');
 });
 
 test('premium breakdown and compare buttons only render when the parent provides the callbacks', () => {
