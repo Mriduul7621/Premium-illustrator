@@ -785,13 +785,13 @@ export default function PlanQuotationModal({
                         <div className="flex justify-between items-center text-slate-700">
                           <span>Policy 1 ({selectedProduct?.productName || 'Primary Plan'} Rider):</span>
                           <span className="font-mono font-bold text-slate-900">
-                            {hasPrimaryCI ? formatCurrency(primaryCiVal) : 'Not Selected (৳ 0)'}
+                            {hasPrimaryCI ? formatCurrency(primaryCiVal) : 'Not Selected (৳0)'}
                           </span>
                         </div>
                         <div className="flex justify-between items-center text-slate-700">
                           <span>Policy 2 (Shanta SDPP - {comboSdppPlan} Plan):</span>
                           <span className="font-mono font-bold text-slate-900">
-                            {isComboSdppElite ? `${formatCurrency(sdppCiVal)} (In-built 50% SA)` : 'No Coverage (৳ 0)'}
+                            {isComboSdppElite ? `${formatCurrency(sdppCiVal)} (In-built 50% SA)` : 'No Coverage (৳0)'}
                           </span>
                         </div>
                         <div className="flex justify-between items-center text-slate-900 font-bold pt-1 border-t border-slate-100">
@@ -1439,7 +1439,7 @@ export default function PlanQuotationModal({
                 <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-3">
                   {/* Hero tiles side by side at every width (board: two
                       half-width tiles even on a 390px phone). Amounts step
-                      down to text-base on phones so ৳ 5,000,000 still fits
+                      down to text-base on phones so ৳50,00,000 still fits
                       one line; the period suffix never splits mid-phrase —
                       on a narrow tile it drops whole to a second line. */}
                   <div className="grid grid-cols-2 gap-2 sm:gap-3">

@@ -41,7 +41,7 @@ test('combination preserves separate payment modes and Prime formula, without in
   assert.match(model.notes.join(' '), /two separate policies/);
 });
 
-for (const product of ['sspe', 'scep_single_1']) {
+for (const product of ['sspe', 'scep_single_3']) {
   test(`${product}: single premium is paid once, never multiplied by the term`, () => {
     const options = quotationFixture(product, 'Single');
     const policy = buildQuotationModel(options).policies[0];
@@ -59,13 +59,17 @@ for (const product of ['s3pp', 's4pp']) {
     assert.equal(total, options.input.sumAssured);
   });
 }
-for (const stipend of [1, 2, 3]) {
-  test(`child plan ${stipend}%: uses the selected stipend percentage`, () => {
-    const options = quotationFixture(`scep_${stipend}`);
-    const policy = buildQuotationModel(options).policies[0];
-    assert.equal(policy.summary[1].rows.find(row => row[0].startsWith('Monthly education'))![1], quoteMoney(options.input.sumAssured * stipend / 100));
-  });
-}
+test('child plan 3%: uses the 3% stipend percentage', () => {
+  const options = quotationFixture('scep_3');
+  const policy = buildQuotationModel(options).policies[0];
+  assert.equal(policy.summary[1].rows.find(row => row[0].startsWith('Monthly education'))![1], quoteMoney(options.input.sumAssured * 3 / 100));
+});
+
+test('child plan single 3%: uses the 3% stipend percentage', () => {
+  const options = quotationFixture('scep_single_3', 'Single');
+  const policy = buildQuotationModel(options).policies[0];
+  assert.equal(policy.summary[1].rows.find(row => row[0].startsWith('Monthly education'))![1], quoteMoney(options.input.sumAssured * 3 / 100));
+});
 
 test('missing / ineligible / invalid calculation fails instead of exporting a misleading quote', () => {
   const options = quotationFixture();

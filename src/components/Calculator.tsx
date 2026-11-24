@@ -34,11 +34,7 @@ const PLAN_STRUCTURE = [
   { id: 's3pp', name: 'Shanta 3 Stage Plan' },
   { id: 's4pp', name: 'Shanta 4 Stage Plan' },
   { id: 'sspe', name: 'Shanta Single Premium Endowment' },
-  { id: 'scep_1', name: 'Shanta Child Education Plan (1%)' },
-  { id: 'scep_2', name: 'Shanta Child Education Plan (2%)' },
   { id: 'scep_3', name: 'Shanta Child Education Plan (3%)' },
-  { id: 'scep_single_1', name: 'Shanta Child Education Plan Single Payment (1%)' },
-  { id: 'scep_single_2', name: 'Shanta Child Education Plan Single Payment (2%)' },
   { id: 'scep_single_3', name: 'Shanta Child Education Plan Single Payment (3%)' },
   { id: 'sdpp', name: "Shanta Depositor's Protection Plan" }
 ];
@@ -51,11 +47,7 @@ const PLAN_CARD_INFO: Record<string, { tagline: string; gloss: string }> = {
   s3pp: { tagline: 'Money back in 3 stages while alive.', gloss: '৩ ধাপে টাকা ফেরত' },
   s4pp: { tagline: 'Money back in 4 stages while alive.', gloss: '৪ ধাপে টাকা ফেরত' },
   sspe: { tagline: 'Pay once, covered for the full term.', gloss: 'একবার জমা, পুরো মেয়াদ সুরক্ষা' },
-  scep_1: { tagline: 'Monthly education stipend for your child, plus full cover.', gloss: 'সন্তানের মাসিক শিক্ষা ভাতা' },
-  scep_2: { tagline: 'Monthly education stipend for your child, plus full cover.', gloss: 'সন্তানের মাসিক শিক্ষা ভাতা' },
   scep_3: { tagline: 'Monthly education stipend for your child, plus full cover.', gloss: 'সন্তানের মাসিক শিক্ষা ভাতা' },
-  scep_single_1: { tagline: 'Pay once — monthly education stipend for your child.', gloss: 'একবার জমা, সন্তানের মাসিক ভাতা' },
-  scep_single_2: { tagline: 'Pay once — monthly education stipend for your child.', gloss: 'একবার জমা, সন্তানের মাসিক ভাতা' },
   scep_single_3: { tagline: 'Pay once — monthly education stipend for your child.', gloss: 'একবার জমা, সন্তানের মাসিক ভাতা' },
   sdpp: { tagline: 'Deposit plan with pension-style returns.', gloss: 'জমায় পেনশন সুবিধা' },
 };
@@ -212,10 +204,6 @@ function CustomerDetailsDisclosure(props: {
         </span>
         <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform flex-shrink-0", open && "rotate-180")} />
       </button>
-      <p className="text-xs text-slate-500">
-        {variant === 'desktop' ? 'Optional — for the quotation. ' : ''}
-        Name &amp; mobile appear on the illustration only when you add them. Nothing here blocks the calculation.
-      </p>
       {open && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="space-y-1 text-xs font-semibold text-brand-text">
@@ -228,23 +216,6 @@ function CustomerDetailsDisclosure(props: {
           </label>
         </div>
       )}
-    </div>
-  );
-}
-
-function OnlyWhatThisPlanNeedsNote() {
-  return (
-    <div className="rounded-2xl border border-[#e5e8df] bg-[#f8f9f3] p-4 space-y-1">
-      <h3 className="text-sm font-bold text-brand-text">Only what this plan needs</h3>
-      <p className="text-xs text-slate-500">Fields that belong to another plan — like the child’s age for a Child Education Plan — stay hidden until that plan is chosen.</p>
-    </div>
-  );
-}
-
-function PrivacyNote() {
-  return (
-    <div className="rounded-2xl border border-[#e5e8df] bg-[#f8f9f3] p-4">
-      <p className="text-xs text-slate-500">Your details stay on this device — they are only used to build the illustration, and only the name and mobile ever appear on it.</p>
     </div>
   );
 }
@@ -1005,8 +976,6 @@ export default function Calculator() {
                 onNameChange={(value) => handleInputChange('name', value)}
                 onPhoneChange={(value) => handleInputChange('phone', value)}
               />
-              <OnlyWhatThisPlanNeedsNote />
-              <PrivacyNote />
             </aside>
             {/* MAIN COLUMN: Policy 1 / Primary Plan Configuration */}
             <div className="space-y-4 sm:space-y-5 min-w-0">
@@ -1100,17 +1069,10 @@ export default function Calculator() {
                   />
                 </div>
 
-                {/* Only what this plan needs — mobile only; desktop shows
-                    this in the summary rail. */}
-                <div className="lg:hidden">
-                  <OnlyWhatThisPlanNeedsNote />
-                </div>
-
                 {/* Issue date */}
                 <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <div className="text-xs font-bold text-brand-text">Issue date</div>
-                    <p className="mt-0.5 text-[11px] text-slate-500">The day the cover starts — premium and maturity count from here.</p>
                   </div>
                   <input
                     type="date"
@@ -1120,10 +1082,6 @@ export default function Calculator() {
                   />
                 </div>
 
-                {/* Privacy note — mobile only; desktop shows this in the rail. */}
-                <div className="lg:hidden">
-                  <PrivacyNote />
-                </div>
               </div>
               <div className={wizardStep === 2 ? 'space-y-4' : 'hidden'}>
               {/* WHICH PLAN — product cards, not a dropdown */}
@@ -1502,7 +1460,6 @@ export default function Calculator() {
               {ridersAvailable && isStep6Complete && (
                 <div className="hidden lg:block rounded-2xl border border-[#e5e8df] bg-white p-4 space-y-2">
                   <h3 className="text-sm font-bold text-brand-text">Next · Step 3 — Extra cover</h3>
-                  <p className="text-xs text-slate-500">Add riders after the plan. They sort into the benefit parts — illness &amp; accident cover in part 2, accidental death in part 3.</p>
                   <div className="flex flex-wrap gap-2">
                     {['Critical Illness — Classic', 'Critical Illness — Standard', 'Accidental Protection'].map(label => (
                       <button

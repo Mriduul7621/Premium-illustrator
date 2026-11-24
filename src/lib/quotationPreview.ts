@@ -105,9 +105,9 @@ export function stagePayouts(
 
 /**
  * Monthly education stipend for Child Education plans, parsed from the product
- * id the same way the rest of the app does (1% / 2% / 3% of the sum assured,
- * paid every month until maturity on covered parental death). Returns null for
- * products that carry no stipend.
+ * id the same way the rest of the app does (3% of the sum assured — the only
+ * stipend variant offered — paid every month until maturity on covered
+ * parental death). Returns null for products that carry no stipend.
  */
 export function scepStipend(productId: string, sumAssured: number): { percent: number; monthly: number } | null {
   if (!productId.startsWith('scep')) return null;
@@ -138,7 +138,7 @@ export interface AccidentalRiderBenefits {
  * Accidental Protection rider benefits, as stated in the quotation model
  * (Rider Brochure): the rider pays its own sum assured - the base sum assured
  * capped at BDT 50 lakh - on top of the base cover, and medical reimbursement
- * is 15% of the main policy amount, capped at BDT 500,000.
+ * is 15% of the main policy amount, capped at BDT 5,00,000.
  */
 export function accidentalRiderBenefits(sumAssured: number): AccidentalRiderBenefits {
   const riderSumAssured = Math.min(sumAssured, 5_000_000);
