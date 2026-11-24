@@ -20,9 +20,28 @@ export interface QuotationOptions {
 }
 export interface QuoteTable {
   title: string;
+  /** One-line "when do I get this?" subtitle, printed under the heading. */
+  subtitle?: string;
   columns: string[];
   rows: string[][];
   note?: string;
+}
+/** One of the three benefit parts the preview and the report share. */
+export interface QuoteBenefitPart {
+  /** e.g. '1. Survival Benefits'. */
+  title: string;
+  /** One-line "when do I get this?" subtitle. */
+  subtitle: string;
+  /** [Benefit / detail, Amount / terms] rows. */
+  rows: string[][];
+  /** Small-print note under the part, e.g. the tax-rebate law citation. */
+  note?: string;
+}
+export interface QuotePolicyBenefits {
+  survival: QuoteBenefitPart;
+  /** Only present when the policy carries illness or accident cover. */
+  uncertainties?: QuoteBenefitPart;
+  death: QuoteBenefitPart;
 }
 export interface QuoteCriticalIllness {
   type: 'classic' | 'standard';
@@ -33,6 +52,13 @@ export interface QuotePolicy {
   mode: PlanFrequency;
   premium: number;
   totalPaid: number;
+  /** Coverage highlighted in the hero: the sum assured for standard plans;
+   * for SDPP the death benefit, else the sum assured, else the deposit-derived
+   * cover (annual deposit x term) — the same fallback as the preview. */
+  coverage: number;
+  isSDPP: boolean;
+  /** Benefits in the three parts the preview and the report share. */
+  benefits: QuotePolicyBenefits;
   summary: QuoteTable[];
   schedules: QuoteTable[];
   criticalIllness?: QuoteCriticalIllness;
@@ -68,6 +94,26 @@ export interface QuotationModel {
 }
 
 export const paymentsPerYear = (mode: PlanFrequency): number => ({ Monthly: 12, Quarterly: 4, 'Half-yearly': 2, Yearly: 1, Single: 1 })[mode];
+
+/** Income Tax Act 2023 s.78 as amended by the Finance Act 2026 (from 1 July
+ * 2026): the rebate is 10% of eligible investment, capped at BDT 750,000,
+ * and the rebate actually allowed is the lowest of 3% of total income, 10%
+ * of eligible investment and BDT 750,000. Life-insurance premium counts as
+ * eligible investment up to 10% of the sum assured; SDPP deposits count in
+ * full (the 10%-of-sum-assured cap is a life-premium rule). The app does not
+ * know the customer's income or other investments, so the figure is this
+ * policy's own contribution — an "up to" amount, never a promise. */
+export const TAX_REBATE_CAP = 750000;
+export const TAX_REBATE_RATE = 0.10;
+export function taxRebateAmount(yearlyAmount: number, options: { isDeposit: boolean; sumAssured?: number }): number {
+  const eligible = options.isDeposit ? yearlyAmount : Math.min(yearlyAmount, (options.sumAssured ?? 0) * 0.10);
+  return Math.min(Math.round(eligible * TAX_REBATE_RATE), TAX_REBATE_CAP);
+}
+const TAX_REBATE_NOTE = 'As per Income Tax Act 2023 (Finance Act 2026). Actual rebate is the lowest of 3% of your total income, 10% of eligible investment and BDT 750,000.';
+/** Lab-test discount at partner hospitals & diagnostic centres, included with
+ * every policy (Mahadi, 2026-11-24). */
+const HOSPITAL_LABEL = 'Lab test discount at partner hospitals & diagnostic centres';
+const HOSPITAL_VALUE = 'Up to 40% off';
 export function quoteMoney(value: number): string {
   if (!Number.isFinite(value)) throw new Error('A quotation amount is invalid. Please recalculate the plan.');
   return `BDT ${new Intl.NumberFormat('en-BD', { maximumFractionDigits: 0 }).format(value)}`;
@@ -107,9 +153,51 @@ function sdppPolicy(input: CalculationInput, data: SDPPResult, plan: string, mod
     [`Surrender value at ${rates.lower}% / ${rates.higher}%`, `${quoteMoney(data.surrenderValue7)} / ${quoteMoney(data.surrenderValue9)}`],
     [`Stop-payment maturity at ${rates.lower}% / ${rates.higher}%`, `${quoteMoney(data.stopPaymentMaturity7)} / ${quoteMoney(data.stopPaymentMaturity9)}`],
   ], 'Illustrative only. Stopping premiums may affect coverage; surrender charges and policy conditions apply.'));
+  const coverage = typeof data.deathBenefit === 'number' ? data.deathBenefit
+    : typeof data.sumAssured === 'number' ? data.sumAssured
+    : (data.annualPremium || (input.targetPremium || 5000) * 12) * input.term;
+  // Benefits in the three parts the preview shows, with the same figures as
+  // the summary tables: maturity scenarios + rebate + hospital perk while
+  // alive, CI / hospital / disability if illness or an accident strikes,
+  // death cover (natural + accidental) for the nominee.
+  const sdppRebate = taxRebateAmount(data.annualPremium, { isDeposit: true });
+  const sdppSurvivalRows = maturityRows.map(row => [...row]);
+  if (sdppRebate > 0) sdppSurvivalRows.push(['Tax rebate (10% of yearly deposit)', `Up to ${quoteMoney(sdppRebate)} / year`]);
+  sdppSurvivalRows.push([HOSPITAL_LABEL, HOSPITAL_VALUE]);
+  const sdppUncertaintyRows: string[][] = [];
+  if (data.ciCoverage > 0) sdppUncertaintyRows.push(['Critical illness coverage', `Up to ${quoteMoney(data.ciCoverage)}`]);
+  if (data.hospitalCoverage > 0) sdppUncertaintyRows.push(['Hospital coverage (25 days / year)', quoteMoney(data.hospitalCoverage)]);
+  if (data.accidentalBenefit > 0) sdppUncertaintyRows.push(['Accidental permanent total disability (APTD)', quoteMoney(data.accidentalBenefit)]);
+  const sdppDeathRows: string[][] = [[
+    'Natural death benefit',
+    typeof data.deathBenefit === 'number' ? `${quoteMoney(data.deathBenefit)} or account value, subject to policy terms` : data.deathBenefit,
+  ]];
+  sdppDeathRows.push(['Accidental death benefit', plan.toLowerCase().includes('prime')
+    ? `${quoteMoney(data.accidentalBenefit)} + death benefit`
+    : quoteMoney(data.accidentalBenefit + (typeof data.deathBenefit === 'number' ? data.deathBenefit : 0))]);
   return {
     title: `Shanta Depositor's Protection Plan - ${plan}`, mode,
     premium: data.totalModePremium, totalPaid: data.totalPremiumPaid,
+    coverage, isSDPP: true,
+    benefits: {
+      survival: {
+        title: '1. Survival Benefits', subtitle: 'What you receive while alive and healthy.',
+        rows: sdppSurvivalRows,
+        note: `These scenarios are not promised returns. Actual credited rates and maturity proceeds may be higher or lower.${sdppRebate > 0 ? ` ${TAX_REBATE_NOTE}` : ''}`,
+      },
+      ...(sdppUncertaintyRows.length ? {
+        uncertainties: {
+          title: '2. Uncertainties Coverage', subtitle: 'If illness or an accident strikes.',
+          rows: sdppUncertaintyRows,
+          note: 'Subject to policy definitions, limits and exclusions.',
+        },
+      } : {}),
+      death: {
+        title: '3. Death Coverage', subtitle: 'If the policyholder dies — paid to your nominee.',
+        rows: sdppDeathRows,
+        note: 'The accidental benefit is additional to the applicable death benefit. Benefits are subject to policy definitions, limits and exclusions.',
+      },
+    },
     summary: [
       { title: 'Premium breakdown', columns: ['Component', `${mode} payment`, 'Over policy term'], rows: premiumRows,
         note: `Basic premiums: ${input.term} years. CI / hospital rider premiums, where applicable: ${riderYears} years; rider premiums are not invested. Amounts are rounded to BDT; totals use unrounded values.` },
@@ -207,6 +295,52 @@ export function buildQuotationModel(options: QuotationOptions): QuotationModel {
       [`At maturity, year ${input.term} (50%)`, quoteMoney(input.sumAssured * 0.5)],
     ];
     if (product.productId === 's4pp') maturity = [1, 2, 3].map(part => [`At year ${Math.round(input.term * part / 4)} (15%)`, quoteMoney(input.sumAssured * 0.15)]).concat([[`At maturity, year ${input.term} (55%)`, quoteMoney(input.sumAssured * 0.55)]]);
+    // Benefits in the three parts the preview shows, with the same figures as
+    // the summary tables: maturity/stages + rebate + hospital perk while
+    // alive, CI / accidental medical / disability if illness or an accident
+    // strikes, death cover (natural + accidental + SCEP stipend/waiver) for
+    // the nominee. Rider benefits sort into the part they belong to.
+    const yearlyForRebate = mode === 'Single' ? product.totalPremium['Single'] : product.totalPremium['Yearly'];
+    const rebate = taxRebateAmount(yearlyForRebate, { isDeposit: false, sumAssured: input.sumAssured });
+    const survivalRows = maturity.map(row => [...row]);
+    if (rebate > 0) survivalRows.push(['Tax rebate (10% of yearly premium)', `Up to ${quoteMoney(rebate)} / year`]);
+    survivalRows.push([HOSPITAL_LABEL, HOSPITAL_VALUE]);
+    const uncertaintyRows: string[][] = [];
+    const ciCover = (input.hasCIClassic || input.hasCIStandard) && input.sumAssured >= 200000
+      ? (input.ciCoverage || ciCoverageAmount(input.sumAssured)) : 0;
+    if (ciCover > 0) uncertaintyRows.push([`Critical illness — ${input.hasCIClassic ? 'Classic' : 'Standard'}`, `Up to ${quoteMoney(ciCover)}`]);
+    if (input.hasAccidentalProtection) uncertaintyRows.push(
+      ['Accidental medical reimbursement', `Up to ${quoteMoney(Math.min(input.sumAssured * 0.15, 500000))}`],
+      ['Accidental permanent total disability (APTD)', quoteMoney(Math.min(input.sumAssured, 5000000))],
+      ['Accidental permanent partial disability (APPD)', `Up to ${quoteMoney(Math.min(input.sumAssured, 5000000))}`],
+    );
+    const deathRows = [['Natural death cover', quoteMoney(naturalDeathAmount)]];
+    if (input.hasAccidentalProtection) deathRows.push(['Accidental death cover (total)', quoteMoney(input.sumAssured + Math.min(input.sumAssured, 5000000))]);
+    if (product.productId.startsWith('scep')) {
+      const stipend = Number(product.productId.split('_').pop()) / 100;
+      deathRows.push(
+        ['Monthly education stipend on covered parental death', `${quoteMoney(input.sumAssured * stipend)} / month`],
+        ['Waiver of premium', 'Future premiums waived in full on covered parental death'],
+      );
+    }
+    const benefitParts: QuotePolicyBenefits = {
+      survival: {
+        title: '1. Survival Benefits', subtitle: 'What you receive while alive and healthy.',
+        rows: survivalRows,
+        note: `Subject to survival, policy status and official policy terms. Staged payouts are not additional to the full sum assured.${rebate > 0 ? ` ${TAX_REBATE_NOTE}` : ''}`,
+      },
+      ...(uncertaintyRows.length ? {
+        uncertainties: {
+          title: '2. Uncertainties Coverage', subtitle: 'If illness or an accident strikes.',
+          rows: uncertaintyRows,
+          note: 'Subject to policy definitions, limits and exclusions.',
+        },
+      } : {}),
+      death: {
+        title: '3. Death Coverage', subtitle: 'If the policyholder dies — paid to your nominee.',
+        rows: deathRows,
+      },
+    };
     const schedules: QuoteTable[] = [];
     if (options.projectionData?.length) schedules.push({
       title: 'Policy value schedule', columns: ['Year', 'Base premium', 'Natural death', 'Surrender value', 'Paid-up value', 'ETI cash back'],
@@ -224,7 +358,7 @@ export function buildQuotationModel(options: QuotationOptions): QuotationModel {
     const criticalIllness: QuoteCriticalIllness | undefined = ciType && input.sumAssured >= 200000 && (ciPremium ?? 0) > 0
       ? { type: ciType, coverage: input.ciCoverage || ciCoverageAmount(input.sumAssured) }
       : undefined;
-    policies.push({ criticalIllness, title: product.productName, mode, premium: product.totalPremium[mode], totalPaid: product.totalPremium[mode] * count, summary, schedules });
+    policies.push({ criticalIllness, title: product.productName, mode, premium: product.totalPremium[mode], totalPaid: product.totalPremium[mode] * count, coverage: input.sumAssured, isSDPP: false, benefits: benefitParts, summary, schedules });
   }
   if (options.isComboEnabled && !isSDPP) {
     if (!options.sdppComboData) throw new Error('The combination calculation is missing. Please recalculate.');
