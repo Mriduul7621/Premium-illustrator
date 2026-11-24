@@ -259,13 +259,23 @@ export async function createQuotationPdf(options: QuotationOptions, generatedAt 
     // No premium breakdown on page 1: with the hero and the full 3-part
     // benefits, the breakdown does not fit for SDPP and heavy rider cases
     // (it spilled onto its own near-empty page). The hero already shows the
-    // per-payment premium and the total payable; the full breakdown stays in
-    // the app's quotation view.
+    // per-payment premium and the total payable.
     if (policy.schedules.length) {
       newPage();
       paragraph('Your policy, year by year', 18, INK, true);
       paragraph('All amounts in Bangladesh Taka (BDT). Projections are indicative, not a promise of returns.', 8.5);
       policy.schedules.forEach(table);
+    }
+    // The premium breakdown gets its own page, after this policy's
+    // year-by-year tables: the split (base premium + rider premiums +
+    // total) for this policy only. For a combo each policy gets its own
+    // breakdown page, so each policy's story stays together; the extra
+    // pages are accepted. The header already names the policy (POLICY
+    // 1 OF 2 / POLICY 2 OF 2), so the page needs no extra label.
+    const breakdown = policy.summary.find(block => block.title === 'Premium breakdown');
+    if (breakdown) {
+      newPage();
+      table(breakdown);
     }
   });
   // Important information & next steps gets its own page, whole — never split

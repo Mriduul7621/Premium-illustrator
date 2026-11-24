@@ -47,13 +47,13 @@ test('CI Classic: the report ends with one appendix page listing only its 19 dis
   const pdf = new Uint8Array(await quotationBytes(page, 'ci-classic'));
   await writeFile(testInfo.outputPath('ci-classic.pdf'), pdf);
   const pages = await inspectPdf(pdf);
-  // 3 core pages (policy + year-by-year + Important information) + appendix.
-  expect(pages).toHaveLength(4);
+  // 4 core pages (policy + year-by-year + breakdown + Important information) + appendix.
+  expect(pages).toHaveLength(5);
   const appendix = pages.at(-1)!;
   expect(appendix).toContain('Critical Illness Classic');
   expect(appendix).toContain('Covered diseases (19)');
   expect(appendix).toContain('BDT 720,000');
-  expect(appendix).toContain('4 / 4');
+  expect(appendix).toContain('5 / 5');
   for (const disease of CLASSIC_CI_DISEASES) expect(appendix, disease.english).toContain(disease.english);
   const foreign = [...MINOR_CI_DISEASES, ...MAJOR_CI_DISEASES]
     .filter(disease => !CLASSIC_CI_DISEASES.some(shared => shared.english === disease.english));
@@ -63,12 +63,17 @@ test('CI Classic: the report ends with one appendix page listing only its 19 dis
   // heavier than the text-only pages of a rider-less report.
   expect(appendix).toContain('BENGALI NAME');
   expect(pdf.length).toBeGreaterThan(150000);
-  // Page 1 carries the rider in the Uncertainties part; page 3 holds the notes whole.
+  // Page 1 carries the rider in the Uncertainties part; page 3 is the
+  // breakdown (base + rider + total); page 4 holds the notes whole.
   expect(pages[0]).toContain('2. Uncertainties Coverage');
   expect(pages[0]).toContain('Critical illness — Classic');
   expect(pages[0]).toContain('Up to BDT 720,000');
-  expect(pages[2]).toContain('Important information & next steps');
+  expect(pages[2]).toContain('Premium breakdown');
+  expect(pages[2]).toContain('Critical illness - Classic');
+  expect(pages[2]).toContain('Total payable');
+  expect(pages[3]).toContain('Important information & next steps');
   expect(pages[1]).not.toContain('Important information & next steps');
+  expect(pages[2]).not.toContain('Important information & next steps');
 });
 
 test('CI Standard: minor and major diseases share the single appendix page, in separate sections', async ({ page }, testInfo) => {
@@ -76,8 +81,8 @@ test('CI Standard: minor and major diseases share the single appendix page, in s
   const pdf = new Uint8Array(await quotationBytes(page, 'ci-standard'));
   await writeFile(testInfo.outputPath('ci-standard.pdf'), pdf);
   const pages = await inspectPdf(pdf);
-  // 3 core pages (policy + year-by-year + Important information) + appendix.
-  expect(pages).toHaveLength(4);
+  // 4 core pages (policy + year-by-year + breakdown + Important information) + appendix.
+  expect(pages).toHaveLength(5);
   const appendix = pages.at(-1)!;
   expect(appendix).toContain('Critical Illness Standard');
   expect(appendix).toContain('Minor critical illness (10)');
@@ -95,8 +100,8 @@ test('without a selected CI rider the report keeps its original pages and no app
   const pdf = new Uint8Array(await quotationBytes(page, 'ci-none'));
   await writeFile(testInfo.outputPath('ci-none.pdf'), pdf);
   const pages = await inspectPdf(pdf);
-  // 3 core pages: policy + benefits, year-by-year, Important information.
-  expect(pages).toHaveLength(3);
+  // 4 core pages: policy + benefits, year-by-year, breakdown, Important information.
+  expect(pages).toHaveLength(4);
   const content = pages.join(' ');
   expect(content).not.toContain('CRITICAL ILLNESS RIDER');
   expect(content).not.toContain('Covered diseases (19)');
@@ -104,13 +109,13 @@ test('without a selected CI rider the report keeps its original pages and no app
   expect(content).not.toContain('Carcinoma in Situ');
 });
 
-test('3-page structure: page 1 hero + 3-part benefits, page 2 year-by-year, page 3 notes whole', async ({ page }, testInfo) => {
+test('4-page structure: page 1 hero + 3-part benefits, page 2 year-by-year, page 3 breakdown, page 4 notes whole', async ({ page }, testInfo) => {
   await page.goto('/');
   const pdf = new Uint8Array(await quotationBytes(page, 'ci-none'));
   await writeFile(testInfo.outputPath('structure.pdf'), pdf);
   const pages = await inspectPdf(pdf);
-  expect(pages).toHaveLength(3);
-  const [first, second, third] = pages;
+  expect(pages).toHaveLength(4);
+  const [first, second, third, fourth] = pages;
   // Page 1: policy info + hero + benefits in the new format.
   expect(first).toContain('Shanta Endowment Plan');
   expect(first).toContain('Mahadi Hasan');
@@ -129,19 +134,27 @@ test('3-page structure: page 1 hero + 3-part benefits, page 2 year-by-year, page
   // Page 2: year-by-year only.
   expect(second).toContain('Your policy, year by year');
   expect(second).toContain('Policy value schedule');
+  expect(second).not.toContain('Premium breakdown');
   expect(second).not.toContain('Important information & next steps');
-  // Page 3: the whole notes section, never split across pages.
-  expect(third).toContain('Important information & next steps');
-  expect(third).toContain('Next step: review the benefits');
+  // Page 3: the premium breakdown on its own page — base + total, no riders here.
+  expect(third).toContain('Premium breakdown');
+  expect(third).toContain('Basic policy');
+  expect(third).toContain('Total payable');
+  expect(third).toContain('BDT 10,216');
+  expect(third).not.toContain('Important information & next steps');
+  // Page 4: the whole notes section, never split across pages.
+  expect(fourth).toContain('Important information & next steps');
+  expect(fourth).toContain('Next step: review the benefits');
   expect(first).not.toContain('Important information & next steps');
   expect(second).not.toContain('Important information & next steps');
+  expect(third).not.toContain('Important information & next steps');
 });
 
 test('below the rider minimum sum assured the appendix explains that no cover applies', async ({ page }) => {
   await page.goto('/');
   const pdf = new Uint8Array(await quotationBytes(page, 'ci-low-sum'));
   const pages = await inspectPdf(pdf);
-  expect(pages).toHaveLength(4);
+  expect(pages).toHaveLength(5);
   const appendix = pages.at(-1)!;
   expect(appendix).toContain('Not applicable');
   expect(appendix).toContain('BDT 200,000');
@@ -152,13 +165,17 @@ test('combination quotation: both policies keep their pages and the appendix app
   await page.goto('/');
   const pdf = new Uint8Array(await quotationBytes(page, 'combo-classic'));
   const pages = await inspectPdf(pdf);
-  // Policy 1 (info + year-by-year) + policy 2 (info + year-by-year) +
-  // Important information on its own page + appendix.
-  expect(pages).toHaveLength(6);
+  // Policy 1 (info + year-by-year + breakdown) + policy 2 (info +
+  // year-by-year + breakdown) + Important information on its own page +
+  // appendix. One breakdown page per policy, each after its own
+  // year-by-year section.
+  expect(pages).toHaveLength(8);
   const appendix = pages.at(-1)!;
   expect(appendix).toContain('Critical Illness Classic');
   expect(appendix).not.toContain('POLICY');
   expect(pages.slice(0, -1).join(' ')).toContain('POLICY 2 OF 2');
+  expect(pages.filter(text => text.includes('Premium breakdown'))).toHaveLength(2);
+  expect(pages[6]).toContain('Important information & next steps');
   expect(pages.filter(text => text.includes('Covered diseases (19)'))).toHaveLength(1);
 });
 
@@ -185,22 +202,33 @@ for (const scenario of ['elite', 'prime', 'signature', 'long', 'combo', 'single'
     expect(content).toContain('Mahadi Hasan');
     expect(content).toContain('Important information & next steps');
     if (['elite', 'prime', 'signature'].includes(scenario)) {
-      expect(pages).toHaveLength(3);
+      expect(pages).toHaveLength(4);
       expect(pages[0]).toContain('Tax rebate (10% of yearly deposit)');
       expect(pages[0]).toContain('Up to BDT 12,000 / year');
       expect(pages[1]).toContain('Your policy, year by year');
       expect(pages[1]).not.toContain('Important information & next steps');
-      expect(pages[2]).toContain('Important information & next steps');
+      expect(pages[2]).toContain('Premium breakdown');
+      expect(pages[2]).toContain('Basic deposit');
+      expect(pages[2]).not.toContain('Important information & next steps');
+      expect(pages[3]).toContain('Important information & next steps');
       expect(content).toContain('7%');
       expect(content).toContain('9%');
       expect(content).toContain('8% assumed rate');
     }
     if (scenario === 'combo') {
-      // Two policies (info + year-by-year each) + Important information.
+      // Two policies (info + year-by-year + breakdown each) + Important information.
+      expect(pages).toHaveLength(7);
+      expect(pages.filter(text => text.includes('Premium breakdown'))).toHaveLength(2);
+      expect(pages[6]).toContain('Important information & next steps');
+    }
+    if (scenario === 'long') {
+      // 25-row year-by-year table spans two pages + breakdown + notes.
       expect(pages).toHaveLength(5);
+      expect(pages.filter(text => text.includes('Premium breakdown'))).toHaveLength(1);
+      expect(pages.at(-1)).toContain('Important information & next steps');
     }
     if (['single', 'child', 'staged'].includes(scenario)) {
-      expect(pages).toHaveLength(3);
+      expect(pages).toHaveLength(4);
     }
     if (scenario === 'elite') {
       expect(content).toContain('BDT 1,587,941');
@@ -232,8 +260,8 @@ test('Bengali personal details render with a bundled font while report text stay
   const pdf = new Uint8Array(bytes);
   await writeFile(testInfo.outputPath('bengali.pdf'), pdf);
   const pages = await inspectPdf(pdf);
-  // The long Bengali name must not push page 1 over: still 3 pages.
-  expect(pages).toHaveLength(3);
+  // The long Bengali name must not push page 1 over: still 4 pages.
+  expect(pages).toHaveLength(4);
   expect(pages.join(' ')).toContain('1. Survival Benefits');
   expect(pages.join(' ')).toContain('3. Death Coverage');
 });
@@ -251,7 +279,7 @@ for (const width of [390, 1280]) {
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/Quotation_.*\.pdf$/);
     const bytes = new Uint8Array(await readFile((await download.path())!));
-    expect(await inspectPdf(bytes)).toHaveLength(3);
+    expect(await inspectPdf(bytes)).toHaveLength(4);
     await expect(page.getByRole('button', { name: 'Download PDF', exact: true })).toBeEnabled();
     expect(errors).toEqual([]);
   });
@@ -335,8 +363,8 @@ test('full journey with the CI rider selected: the downloaded report ends with t
   const download = await downloadPromise;
   const bytes = new Uint8Array(await readFile((await download.path())!));
   const pages = await inspectPdf(bytes);
-  // 3 core pages + appendix.
-  expect(pages).toHaveLength(4);
+  // 4 core pages + appendix.
+  expect(pages).toHaveLength(5);
   const appendix = pages.at(-1)!;
   expect(appendix).toContain('Critical Illness Standard');
   expect(appendix).toContain('Carcinoma in Situ');
