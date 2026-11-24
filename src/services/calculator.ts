@@ -258,7 +258,7 @@ export function calculatePremiums(input: CalculationInput): (CalculationResult |
       adbYearly = (accidentalRateForAge(age) * riderSA) / 1000;
     }
 
-    // CI Eligibility - Coverage is 50% of Sum Assured, max 15 Lakh (1,500,000)
+    // CI Eligibility - Coverage is 50% of Sum Assured, max 15 Lakh (15,00,000)
     // per the Rider Brochure. Shared rider rules live in data/ciDiseases so
     // pricing, the app and the report agree.
     const isCIEligible = !isSSPE && isCiRiderEligible(sumAssured);

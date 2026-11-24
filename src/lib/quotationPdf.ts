@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import { autoTable, type UserOptions } from 'jspdf-autotable';
-import { buildQuotationModel, quoteMoney, type CiConditionEntry, type CiRiderSchedule, type QuotationOptions, type QuoteTable } from './quotationModel';
+import { buildQuotationModel, quoteMoney, type CiConditionEntry, type CiRiderSchedule, type QuotationOptions, type QuoteBenefitPart, type QuotePolicy, type QuoteTable } from './quotationModel';
 
 const INK = '#193b37';
 const MUTED = '#64736f';
@@ -67,6 +67,7 @@ export async function createQuotationPdf(options: QuotationOptions, generatedAt 
   function heading(value: string) { room(20); y += 3; text(value, LEFT, y, 10, INK, true); y += 5; }
   function table(block: QuoteTable) {
     heading(block.title);
+    if (block.subtitle) paragraph(block.subtitle, 8, MUTED);
     const settings: UserOptions = {
       startY: y, margin: { top: 49, right: LEFT, bottom: 25, left: LEFT }, tableWidth: WIDTH,
       head: [block.columns], body: block.rows,
@@ -206,6 +207,37 @@ export async function createQuotationPdf(options: QuotationOptions, generatedAt 
     paragraph(schedule.note, 7.8);
   }
 
+  /** Page-1 hero: the two numbers every customer asks about — what you pay
+   * and what you are covered for — with the total payable small under the
+   * premium. Same layout as the redesigned quotation preview. */
+  function hero(policy: QuotePolicy) {
+    const boxHeight = 26;
+    const gap = 4;
+    const boxWidth = (WIDTH - gap) / 2;
+    room(boxHeight);
+    const top = y;
+    const tile = (x: number, label: string, value: string, small: string) => {
+      pdf.setFillColor(PAPER);
+      pdf.roundedRect(x, top, boxWidth, boxHeight, 2, 2, 'F');
+      pdf.setDrawColor(ACCENT);
+      pdf.setLineWidth(0.4);
+      pdf.roundedRect(x, top, boxWidth, boxHeight, 2, 2, 'D');
+      text(label, x + 5, top + 6, 7, MUTED, true);
+      text(value, x + 5, top + 14.5, 15, INK, true);
+      text(small, x + 5, top + 21, 7.5, MUTED);
+    };
+    tile(LEFT, `${policy.mode.toUpperCase()} PAYMENT`, quoteMoney(policy.premium),
+      `Total payable over ${model.input.term} years: ${quoteMoney(policy.totalPaid)}`);
+    tile(LEFT + boxWidth + gap,
+      policy.isSDPP ? 'YOUR COVERAGE' : 'YOUR COVERAGE (SUM ASSURED)',
+      quoteMoney(policy.coverage), 'The amount your family is protected for');
+    y = top + boxHeight + 3;
+  }
+  /** One benefit part as a two-column table, in the preview's wording. */
+  function benefitTable(part: QuoteBenefitPart): QuoteTable {
+    return { title: part.title, subtitle: part.subtitle, columns: ['Benefit', 'Amount'], rows: part.rows, note: part.note };
+  }
+
   model.policies.forEach((policy, index) => {
     activePolicy = model.policies.length > 1 ? `POLICY ${index + 1} OF ${model.policies.length}  /  SEPARATE POLICY OBLIGATION` : 'YOUR PERSONALIZED PLAN';
     if (index === 0) { header(); y = 48; } else newPage();
@@ -220,21 +252,36 @@ export async function createQuotationPdf(options: QuotationOptions, generatedAt 
     const dob = model.input.dob || 'Not provided';
     paragraph(`Age: ${model.input.age} years    |    ${model.input.gender}    |    Date of birth: ${dob}`, 8);
     paragraph(`Policy term: ${model.input.term} years    |    Payment mode: ${policy.mode}${model.input.childAge !== undefined && policy.title.includes('Child') ? `    |    Child age: ${model.input.childAge} years` : ''}`, 8);
-    room(26);
-    pdf.setFillColor(PAPER); pdf.roundedRect(LEFT, y, WIDTH, 22, 2, 2, 'F');
-    text(`${policy.mode.toUpperCase()} PAYMENT`, LEFT + 5, y + 6, 7, MUTED, true);
-    text(quoteMoney(policy.premium), LEFT + 5, y + 15, 16, INK, true);
-    text('TOTAL PREMIUMS OVER TERM', 112, y + 6, 7, MUTED, true);
-    text(quoteMoney(policy.totalPaid), 112, y + 15, 13, INK, true);
-    y += 28;
-    policy.summary.forEach(table);
+    hero(policy);
+    table(benefitTable(policy.benefits.survival));
+    if (policy.benefits.uncertainties) table(benefitTable(policy.benefits.uncertainties));
+    table(benefitTable(policy.benefits.death));
+    // No premium breakdown on page 1: with the hero and the full 3-part
+    // benefits, the breakdown does not fit for SDPP and heavy rider cases
+    // (it spilled onto its own near-empty page). The hero already shows the
+    // per-payment premium and the total payable.
     if (policy.schedules.length) {
       newPage();
       paragraph('Your policy, year by year', 18, INK, true);
       paragraph('All amounts in Bangladesh Taka (BDT). Projections are indicative, not a promise of returns.', 8.5);
       policy.schedules.forEach(table);
     }
+    // The premium breakdown gets its own page, after this policy's
+    // year-by-year tables: the split (base premium + rider premiums +
+    // total) for this policy only. For a combo each policy gets its own
+    // breakdown page, so each policy's story stays together; the extra
+    // pages are accepted. The header already names the policy (POLICY
+    // 1 OF 2 / POLICY 2 OF 2), so the page needs no extra label.
+    const breakdown = policy.summary.find(block => block.title === 'Premium breakdown');
+    if (breakdown) {
+      newPage();
+      table(breakdown);
+    }
   });
+  // Important information & next steps gets its own page, whole — never split
+  // half on the year-by-year page and half on the next.
+  if (model.policies.length > 1) activePolicy = '';
+  newPage();
   heading('Important information & next steps');
   model.notes.forEach((note, index) => paragraph(`${index + 1}. ${note}`, 8));
   // The rider condition list is an appendix: its own page, at the very end, only when selected.
