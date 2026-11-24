@@ -1438,37 +1438,42 @@ export default function PlanQuotationModal({
                     under the premium; maturity and death cover live in
                     the benefit sections below. */}
                 <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="rounded-xl border-2 border-brand-primary bg-[#F9FAF3] p-4">
+                  {/* Hero tiles side by side at every width (board: two
+                      half-width tiles even on a 390px phone). Amounts step
+                      down to text-base on phones so ৳ 5,000,000 still fits
+                      one line; the period suffix never splits mid-phrase —
+                      on a narrow tile it drops whole to a second line. */}
+                  <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                    <div className="rounded-xl border-2 border-brand-primary bg-[#F9FAF3] p-3 sm:p-4">
                       <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">You pay</div>
-                      <div className="mt-1 font-mono text-2xl font-black text-brand-primary">{formatCurrency(selectedProduct?.totalPremium?.[input.paymentMethod] || 0)} <small className="text-sm font-bold text-slate-500">{heroPeriodSuffix}</small></div>
-                      <div className="mt-2 border-t border-brand-primary/20 pt-2 text-[11px] text-slate-600">
+                      <div className="mt-1 font-mono text-base sm:text-2xl font-black text-brand-primary">{formatCurrency(selectedProduct?.totalPremium?.[input.paymentMethod] || 0)} <small className="whitespace-nowrap text-[11px] sm:text-sm font-bold text-slate-500">{heroPeriodSuffix}</small></div>
+                      <div className="mt-2 border-t border-brand-primary/20 pt-2 text-[10px] sm:text-[11px] text-slate-600">
                         Total payable over {input.term} yrs<br /><span className="font-mono font-bold text-brand-text">{formatCurrency(primaryPaid)}</span>
                       </div>
-                      {(onViewPremiumBreakdown || (onViewModeComparison && standardHasModes)) && (
-                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
-                          {onViewPremiumBreakdown && (
-                            <button type="button" onClick={onViewPremiumBreakdown} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">Breakdown →</button>
-                          )}
-                          {onViewModeComparison && standardHasModes && (
-                            <button type="button" onClick={onViewModeComparison} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">Compare →</button>
-                          )}
-                        </div>
-                      )}
                     </div>
-                    <div className="rounded-xl border-2 border-brand-primary bg-[#F9FAF3] p-4">
+                    <div className="rounded-xl border-2 border-brand-primary bg-[#F9FAF3] p-3 sm:p-4">
                       <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">You are covered for</div>
-                      <div className="mt-1 font-mono text-2xl font-black text-brand-primary">{formatCurrency(displayTargetSumAssured)}</div>
+                      <div className="mt-1 font-mono text-base sm:text-2xl font-black text-brand-primary">{formatCurrency(displayTargetSumAssured)}</div>
                       <div className="mt-0.5 text-[10px] text-slate-500">Sum Assured — your family’s protection amount</div>
                     </div>
                   </div>
+                  {/* Breakdown / Compare sit under the tiles: the half-width
+                      tiles are too narrow to hold them without crowding. */}
+                  {(onViewPremiumBreakdown || (onViewModeComparison && standardHasModes)) && (
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                      {onViewPremiumBreakdown && (
+                        <button type="button" onClick={onViewPremiumBreakdown} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">Breakdown →</button>
+                      )}
+                      {onViewModeComparison && standardHasModes && (
+                        <button type="button" onClick={onViewModeComparison} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">Compare →</button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                {/* What you get — benefits in three parts */}
+                {/* Benefits in three parts — directly after the hero, no
+                    section header (neither board shows one). */}
                 <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-4">
-                  <h3 className="text-xs font-black uppercase tracking-wider text-brand-text border-b-2 border-brand-primary/40 pb-2">
-                    What you get
-                  </h3>
 
                   {/* Stage timeline — desktop: one horizontal strip above the
                       three benefit parts (stage plans only). The same dates
@@ -1671,7 +1676,10 @@ export default function PlanQuotationModal({
                       <p className="hidden lg:block text-[11px] text-slate-500">Add the Accidental Protection rider to cover accidental death at 200% of the sum assured.</p>
                     )}
                     <div className="flex justify-between items-start gap-2">
-                      <div className="text-xs font-bold text-brand-text">Death cover — paid to your nominee</div>
+                      <div>
+                        <div className="text-xs font-bold text-brand-text">Natural death</div>
+                        <div className="text-[11px] text-slate-500">paid to your nominee</div>
+                      </div>
                       <div className="font-mono font-black text-base text-brand-text text-right">{formatCurrency(standardDeathCover)}</div>
                     </div>
                     {standardAdb && (

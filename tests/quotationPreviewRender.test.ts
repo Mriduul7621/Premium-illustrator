@@ -34,7 +34,7 @@ test('standard preview: hero and three-part benefits in order, with engine figur
   const html = renderPreview(options);
   const product = options.selectedProduct!;
   const heroAt = html.indexOf('You pay');
-  const benefitsAt = html.indexOf('What you get');
+  const benefitsAt = html.indexOf('1. Survival Benefits');
   assert.ok(heroAt > -1 && benefitsAt > heroAt, 'sections appear in the order hero, benefits');
   assert.ok(html.includes(formatCurrency(product.totalPremium.Monthly)));
   assert.ok(html.includes(formatCurrency(product.totalPremium.Monthly * 180)));
@@ -173,7 +173,8 @@ test('standard preview: single-premium plans show no Compare button, and SSPE de
   assert.ok(!html.includes('Compare Payment Modes'), 'one mode only, so there is nothing to compare');
   assert.ok(!html.includes('Compare →'), 'no Compare button when there is only one mode');
   assert.ok(html.includes('Breakdown'), 'the Breakdown button still shows for single-premium plans');
-  assert.ok(html.includes('What you get'), 'benefits section is unnumbered now');
+  assert.ok(!html.includes('What you get'), 'no What-you-get header — the benefit parts follow the hero directly');
+  assert.ok(html.includes('1. Survival Benefits'), 'benefits still open with Survival');
   assert.ok(html.includes(formatCurrency(product.totalPremium.Single)));
   assert.ok(html.includes(formatCurrency(product.maturityValue!)));
   // Single-premium plans have no rider step, so the empty Uncertainties
@@ -186,7 +187,7 @@ test('standard preview: single-premium plans show no Compare button, and SSPE de
 test('standard preview: projection is a flowing section with the Liquidity columns', () => {
   const options = quotationFixture('endowment', 'Monthly', 15);
   const html = renderPreview(options, { showProjection: true });
-  const benefitsAt = html.indexOf('What you get');
+  const benefitsAt = html.indexOf('1. Survival Benefits');
   const projectionAt = html.indexOf('Policy Value Projection Trajectory');
   assert.ok(benefitsAt > -1 && projectionAt > benefitsAt, 'projection follows the benefits section');
   // Same 8 columns as the Liquidity tab, title case.

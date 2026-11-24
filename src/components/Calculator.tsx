@@ -60,8 +60,9 @@ const PLAN_CARD_INFO: Record<string, { tagline: string; gloss: string }> = {
   sdpp: { tagline: 'Deposit plan with pension-style returns.', gloss: 'জমায় পেনশন সুবিধা' },
 };
 
-// Featured plans shown first on the cards; the rest sit behind "Show all plans".
-const FEATURED_PLAN_IDS = ['s3pp', 'endowment', 's4pp', 'sspe'];
+// Featured plans shown first on the cards (board: exactly these two);
+// the rest sit behind "Show all plans".
+const FEATURED_PLAN_IDS = ['s3pp', 'endowment'];
 
 // Payment-mode chips in board order (Yearly first, Single last).
 const MODE_DISPLAY_ORDER: PlanFrequency[] = ['Yearly', 'Half-yearly', 'Quarterly', 'Monthly', 'Single'];
@@ -941,9 +942,9 @@ export default function Calculator() {
 
           <nav aria-label="Configuration steps" className="sticky top-0 z-20 grid grid-cols-3 gap-2 rounded-xl border border-[#e5e8df] bg-[#f8f9f3] p-2">
             {([
-              { name: 'About you', complete: isStep1Complete, disabled: false },
-              { name: 'Your plan', complete: isStep6Complete, disabled: !isStep1Complete },
-              { name: 'Extra cover', complete: !resultsBlocked, disabled: !isStep6Complete },
+              { name: 'About you', disabled: false },
+              { name: 'Your plan', disabled: !isStep1Complete },
+              { name: 'Extra cover', disabled: !isStep6Complete },
             ] as const).map((step, index) => (
               <button
                 key={step.name}
@@ -956,13 +957,17 @@ export default function Calculator() {
                   wizardStep === index + 1 ? 'bg-brand-primary text-white shadow-sm' : 'text-brand-text hover:bg-white'
                 )}
               >
+                {/* Board: the current step shows its number, steps behind
+                    it show a check, future steps show a greyed number. */}
                 <span className={cn(
                   'w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center flex-shrink-0',
-                  step.complete
-                    ? (wizardStep === index + 1 ? 'bg-white/25 text-white' : 'bg-emerald-600 text-white')
-                    : (wizardStep === index + 1 ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-600')
+                  index + 1 < wizardStep
+                    ? 'bg-emerald-600 text-white'
+                    : wizardStep === index + 1
+                      ? 'bg-white/25 text-white'
+                      : 'bg-slate-200 text-slate-600'
                 )}>
-                  {step.complete ? <Check className="w-3 h-3 stroke-[3]" /> : index + 1}
+                  {index + 1 < wizardStep ? <Check className="w-3 h-3 stroke-[3]" /> : index + 1}
                 </span>
                 <span className="truncate"><span className="hidden lg:inline">{index + 1} · </span>{step.name}</span>
               </button>
