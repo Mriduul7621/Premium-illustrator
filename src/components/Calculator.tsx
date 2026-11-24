@@ -6,7 +6,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Calendar, User, Clock, Shield, Activity, HelpCircle, 
-  ChevronDown, Check, X, Info, Phone, Mail, DollarSign, 
+  ChevronDown, Check, X, Info, Phone, Mail,
   Settings2, ArrowLeftRight, Eye, ListFilter, AlertCircle, Smartphone, UserCircle, Briefcase, CheckCircle2, ShieldAlert,
   ArrowLeft, ArrowRight, ExternalLink, Zap, Home, Sparkles, ChevronRight, CircleUser, Target, PlusCircle, Plus, GraduationCap,
   Printer, Download, BarChart3, Scale, Menu
@@ -839,9 +839,18 @@ export default function Calculator() {
 
     // Plans visible on the cards: featured first; a selected non-featured
     // plan stays visible when collapsed.
+    // Collapsed: featured plans in FEATURED order (S3PP first, per the
+    // board), with a selected non-featured plan kept visible at the end.
     const visiblePlans = showAllPlans
       ? PLAN_STRUCTURE
-      : PLAN_STRUCTURE.filter(p => FEATURED_PLAN_IDS.includes(p.id) || p.id === selectedProductId);
+      : PLAN_STRUCTURE.filter(p => FEATURED_PLAN_IDS.includes(p.id) || p.id === selectedProductId)
+          .sort((a, b) => {
+            const rank = (id: string) => {
+              const i = FEATURED_PLAN_IDS.indexOf(id);
+              return i === -1 ? FEATURED_PLAN_IDS.length : i;
+            };
+            return rank(a.id) - rank(b.id);
+          });
 
     const ridersAvailable = !isSDPP && !isSinglePremiumProduct;
 
@@ -1210,7 +1219,7 @@ export default function Calculator() {
                           : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
                       )}
                     >
-                      <Shield className="w-3.5 h-3.5 flex-shrink-0" /> I want cover of…
+                      I want cover of…
                     </button>
                     <button
                       type="button"
@@ -1224,7 +1233,7 @@ export default function Calculator() {
                           : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
                       )}
                     >
-                      <DollarSign className="w-3.5 h-3.5 flex-shrink-0" /> I can pay… a year
+                      I can pay… a year
                     </button>
                   </div>
                 ) : (
