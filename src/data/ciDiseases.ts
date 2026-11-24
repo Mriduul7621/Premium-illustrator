@@ -16,7 +16,7 @@ export interface CiDisease {
   bengali: string;
 }
 
-/** Coverage is 50% of the sum assured, capped at BDT 1,500,000 (Rider Brochure maximum). */
+/** Coverage is 50% of the sum assured, capped at BDT 15,00,000 (Rider Brochure maximum). */
 export const CI_COVERAGE_SHARE_OF_SUM_ASSURED = 0.5;
 export const CI_COVERAGE_CAP = 1_500_000;
 /** Standard rider benefit split: 30% for a minor claim, 70% for a later major claim. */

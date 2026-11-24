@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildQuotationModel, quoteMoney } from '../src/lib/quotationModel';
+import { buildQuotationModel, quoteMoney, taxRebateAmount } from '../src/lib/quotationModel';
+import { calculatePremiums } from '../src/services/calculator';
 import { quotationFixture, comboFixture } from './fixtures';
 import { quotationFilename } from '../src/lib/quotationPdf';
 
@@ -41,7 +42,7 @@ test('combination preserves separate payment modes and Prime formula, without in
   assert.match(model.notes.join(' '), /two separate policies/);
 });
 
-for (const product of ['sspe', 'scep_single_1']) {
+for (const product of ['sspe', 'scep_single_3']) {
   test(`${product}: single premium is paid once, never multiplied by the term`, () => {
     const options = quotationFixture(product, 'Single');
     const policy = buildQuotationModel(options).policies[0];
@@ -59,13 +60,17 @@ for (const product of ['s3pp', 's4pp']) {
     assert.equal(total, options.input.sumAssured);
   });
 }
-for (const stipend of [1, 2, 3]) {
-  test(`child plan ${stipend}%: uses the selected stipend percentage`, () => {
-    const options = quotationFixture(`scep_${stipend}`);
-    const policy = buildQuotationModel(options).policies[0];
-    assert.equal(policy.summary[1].rows.find(row => row[0].startsWith('Monthly education'))![1], quoteMoney(options.input.sumAssured * stipend / 100));
-  });
-}
+test('child plan 3%: uses the 3% stipend percentage', () => {
+  const options = quotationFixture('scep_3');
+  const policy = buildQuotationModel(options).policies[0];
+  assert.equal(policy.summary[1].rows.find(row => row[0].startsWith('Monthly education'))![1], quoteMoney(options.input.sumAssured * 3 / 100));
+});
+
+test('child plan single 3%: uses the 3% stipend percentage', () => {
+  const options = quotationFixture('scep_single_3', 'Single');
+  const policy = buildQuotationModel(options).policies[0];
+  assert.equal(policy.summary[1].rows.find(row => row[0].startsWith('Monthly education'))![1], quoteMoney(options.input.sumAssured * 3 / 100));
+});
 
 test('missing / ineligible / invalid calculation fails instead of exporting a misleading quote', () => {
   const options = quotationFixture();
@@ -104,4 +109,89 @@ test('no Classic/Standard appendix is invented for built-in SDPP CI or ineligibl
   assert.equal(buildQuotationModel(options).policies[0].criticalIllness, undefined);
   options.input.hasCIStandard = true;
   assert.throws(() => buildQuotationModel(options), /only one Critical Illness rider/);
+});
+
+test('tax rebate: 10% of yearly premium up to 10% of sum assured, capped at BDT 750,000', () => {
+  assert.equal(taxRebateAmount(87178, { isDeposit: false, sumAssured: 1440000 }), 8718);
+  // Single premium above the 10%-of-SA eligibility cap: only 10% of SA counts.
+  assert.equal(taxRebateAmount(1440000, { isDeposit: false, sumAssured: 1440000 }), 14400);
+  assert.equal(taxRebateAmount(9000000, { isDeposit: false, sumAssured: 100000000 }), 750000);
+  // SDPP deposits count in full — the 10%-of-SA cap is a life-premium rule.
+  assert.equal(taxRebateAmount(120000, { isDeposit: true }), 12000);
+  assert.equal(taxRebateAmount(120000, { isDeposit: true, sumAssured: 100000 }), 12000);
+  assert.equal(taxRebateAmount(9000000, { isDeposit: true }), 750000);
+});
+
+test('benefits: no-rider endowment has survival + death only, with rebate and hospital perk', () => {
+  const options = quotationFixture('endowment', 'Monthly', 15);
+  const policy = buildQuotationModel(options).policies[0];
+  assert.equal(policy.coverage, 1440000);
+  assert.equal(policy.isSDPP, false);
+  assert.deepEqual(policy.benefits.survival.rows[0][1], quoteMoney(1440000));
+  assert.deepEqual(policy.benefits.survival.rows[1], ['Tax rebate (10% of yearly premium)', `Up to ${quoteMoney(8718)} / year`]);
+  assert.deepEqual(policy.benefits.survival.rows[2][1], 'Up to 40% off');
+  assert.match(policy.benefits.survival.note!, /Income Tax Act 2023 \(Finance Act 2026\)/);
+  assert.deepEqual(policy.benefits.uncertainties, undefined);
+  assert.deepEqual(policy.benefits.death.rows.length, 1);
+  assert.deepEqual(policy.benefits.death.rows[0][1], quoteMoney(1440000));
+});
+
+test('benefits: CI + accidental rider sort into Uncertainties and Death parts', async () => {
+  const { ciQuotationFixture } = await import('./fixtures');
+  const options = ciQuotationFixture('classic');
+  options.input.hasAccidentalProtection = true;
+  options.selectedProduct = calculatePremiums(options.input).find(result => result.productId === 'endowment')!;
+  const policy = buildQuotationModel(options).policies[0];
+  const uncertainties = policy.benefits.uncertainties!;
+  assert.deepEqual(uncertainties.rows.length, 4);
+  assert.deepEqual(uncertainties.rows[0], ['Critical illness — Classic', `Up to ${quoteMoney(720000)}`]);
+  assert.deepEqual(uncertainties.rows[1], ['Accidental medical reimbursement', `Up to ${quoteMoney(216000)}`]);
+  assert.deepEqual(uncertainties.rows[2][0], 'Accidental permanent total disability (APTD)');
+  assert.deepEqual(uncertainties.rows[3][0], 'Accidental permanent partial disability (APPD)');
+  assert.deepEqual(policy.benefits.death.rows[1], ['Accidental death cover (total)', quoteMoney(2880000)]);
+  assert.deepEqual(policy.benefits.survival.rows[1], ['Tax rebate (10% of yearly premium)', `Up to ${quoteMoney(12776)} / year`]);
+});
+
+test('benefits: SCEP stipend and waiver sit in Death Coverage', () => {
+  const options = quotationFixture('scep_3', 'Monthly', 15);
+  const policy = buildQuotationModel(options).policies[0];
+  assert.deepEqual(policy.benefits.death.rows[1], ['Monthly education stipend on covered parental death', `${quoteMoney(43200)} / month`]);
+  assert.deepEqual(policy.benefits.death.rows[2][0], 'Waiver of premium');
+});
+
+test('benefits: SSPE rebate is capped by 10% of sum assured, death cover is the maturity value', () => {
+  const options = quotationFixture('sspe', 'Single');
+  const policy = buildQuotationModel(options).policies[0];
+  assert.deepEqual(policy.benefits.survival.rows[1], ['Tax rebate (10% of yearly premium)', `Up to ${quoteMoney(14400)} / year`]);
+  assert.deepEqual(policy.benefits.death.rows[0][1], quoteMoney(2505600));
+});
+
+test('benefits: SDPP Elite has CI + hospital + APTD uncertainties and a deposit-based rebate', () => {
+  const options = quotationFixture('sdpp_elite', 'Monthly', 12);
+  const policy = buildQuotationModel(options).policies[0];
+  assert.equal(policy.coverage, 1440000);
+  assert.equal(policy.isSDPP, true);
+  assert.deepEqual(policy.benefits.survival.rows[2], ['Tax rebate (10% of yearly deposit)', `Up to ${quoteMoney(12000)} / year`]);
+  assert.deepEqual(policy.benefits.survival.rows[3][1], 'Up to 40% off');
+  const uncertainties = policy.benefits.uncertainties!;
+  assert.deepEqual(uncertainties.rows.length, 3);
+  assert.deepEqual(uncertainties.rows[0], ['Critical illness coverage', `Up to ${quoteMoney(720000)}`]);
+  assert.deepEqual(uncertainties.rows[1], ['Hospital coverage (25 days / year)', quoteMoney(250000)]);
+  assert.deepEqual(uncertainties.rows[2], ['Accidental permanent total disability (APTD)', quoteMoney(2880000)]);
+  assert.deepEqual(policy.benefits.death.rows[1], ['Accidental death benefit', quoteMoney(4320000)]);
+});
+
+test('benefits: SDPP Prime coverage falls back to the deposit-derived cover', () => {
+  const options = quotationFixture('sdpp_prime', 'Monthly', 12);
+  const policy = buildQuotationModel(options).policies[0];
+  assert.equal(policy.coverage, 120000 * 12);
+  assert.deepEqual(policy.benefits.death.rows[0][1], 'Current account value or Paid Basic premium, whichever is higher');
+  assert.deepEqual(policy.benefits.death.rows[1], ['Accidental death benefit', `${quoteMoney(2880000)} + death benefit`]);
+  assert.deepEqual(policy.benefits.uncertainties!.rows.length, 1);
+});
+
+test('benefits: combo shows a real rebate on each policy', () => {
+  const model = buildQuotationModel(comboFixture());
+  assert.deepEqual(model.policies[0].benefits.survival.rows[1], ['Tax rebate (10% of yearly premium)', `Up to ${quoteMoney(11569)} / year`]);
+  assert.deepEqual(model.policies[1].benefits.survival.rows[3], ['Tax rebate (10% of yearly deposit)', `Up to ${quoteMoney(12000)} / year`]);
 });

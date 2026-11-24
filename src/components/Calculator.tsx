@@ -2,14 +2,14 @@ import { savePdf } from '../lib/savePdf';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { sanitizeClonedDocForPdf } from '../lib/pdfColorSanitizer';
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Calendar, User, Clock, Shield, Activity, HelpCircle, 
-  ChevronDown, Check, X, Info, Phone, Mail, DollarSign, 
+  ChevronDown, Check, X, Info, Phone, Mail,
   Settings2, ArrowLeftRight, Eye, ListFilter, AlertCircle, Smartphone, UserCircle, Briefcase, CheckCircle2, ShieldAlert,
   ArrowLeft, ArrowRight, ExternalLink, Zap, Home, Sparkles, ChevronRight, CircleUser, Target, PlusCircle, Plus, GraduationCap,
-  FileText, Printer, Download, BarChart3, Scale, Menu
+  Printer, Download, BarChart3, Scale, Menu
 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { calculatePremiums, calculateSDPPResult, calculateProjection, calculateSAFromPremium, ageNearestBirthday } from '../services/calculator';
@@ -18,6 +18,7 @@ import { CalculationInput, CalculationResult, PlanFrequency, Gender, SDPPResult,
 import { CLASSIC_CI_DISEASES, MINOR_CI_DISEASES, MAJOR_CI_DISEASES, CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR, CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR, CI_MINOR_BENEFIT_SHARE, ciCoverageAmount, ciDiseaseLabel } from '../data/ciDiseases';
 import { differenceInYears, parse, format } from 'date-fns';
 import PlanQuotationModal from './PlanQuotationModal';
+import ResultsTabBar from './ResultsTabBar';
 import PremiumBreakdownModal from './PremiumBreakdownModal';
 import ModeComparisonModal from './ModeComparisonModal';
 import CriticalIllnessDialog from './CriticalIllnessDialog';
@@ -33,13 +34,37 @@ const PLAN_STRUCTURE = [
   { id: 's3pp', name: 'Shanta 3 Stage Plan' },
   { id: 's4pp', name: 'Shanta 4 Stage Plan' },
   { id: 'sspe', name: 'Shanta Single Premium Endowment' },
-  { id: 'scep_1', name: 'Shanta Child Education Plan (1%)' },
-  { id: 'scep_2', name: 'Shanta Child Education Plan (2%)' },
   { id: 'scep_3', name: 'Shanta Child Education Plan (3%)' },
-  { id: 'scep_single_1', name: 'Shanta Child Education Plan Single Payment (1%)' },
-  { id: 'scep_single_2', name: 'Shanta Child Education Plan Single Payment (2%)' },
   { id: 'scep_single_3', name: 'Shanta Child Education Plan Single Payment (3%)' },
   { id: 'sdpp', name: "Shanta Depositor's Protection Plan" }
+];
+
+// Plain-language purpose + short Bangla gloss per plan, shown on the
+// product cards. S3PP and Endowment wording is board-verified; the rest
+// are parallel constructions in the same pattern.
+const PLAN_CARD_INFO: Record<string, { tagline: string; gloss: string }> = {
+  endowment: { tagline: 'One payout at maturity + full cover before.', gloss: 'মেয়াদ শেষে একবারে' },
+  s3pp: { tagline: 'Money back in 3 stages while alive.', gloss: '৩ ধাপে টাকা ফেরত' },
+  s4pp: { tagline: 'Money back in 4 stages while alive.', gloss: '৪ ধাপে টাকা ফেরত' },
+  sspe: { tagline: 'Pay once, covered for the full term.', gloss: 'একবার জমা, পুরো মেয়াদ সুরক্ষা' },
+  scep_3: { tagline: 'Monthly education stipend for your child, plus full cover.', gloss: 'সন্তানের মাসিক শিক্ষা ভাতা' },
+  scep_single_3: { tagline: 'Pay once — monthly education stipend for your child.', gloss: 'একবার জমা, সন্তানের মাসিক ভাতা' },
+  sdpp: { tagline: 'Deposit plan with pension-style returns.', gloss: 'জমায় পেনশন সুবিধা' },
+};
+
+// Featured plans shown first on the cards (board: exactly these two);
+// the rest sit behind "Show all plans".
+const FEATURED_PLAN_IDS = ['s3pp', 'endowment'];
+
+// Payment-mode chips in board order (Yearly first, Single last).
+const MODE_DISPLAY_ORDER: PlanFrequency[] = ['Yearly', 'Half-yearly', 'Quarterly', 'Monthly', 'Single'];
+
+// Quick-pick cover amounts under the cover-amount field (mobile shows these
+// three; desktop adds ৳50,00,000 as a fourth chip).
+const QUICK_PICK_AMOUNTS = [
+  { value: 500000, label: '৳5,00,000' },
+  { value: 1000000, label: '৳10,00,000' },
+  { value: 2000000, label: '৳20,00,000' },
 ];
 
 const SDPP_PLANS: { id: string; name: string }[] = [
@@ -139,6 +164,114 @@ const INITIAL_INPUT: CalculationInput = {
   issueDate: new Date().toISOString().split('T')[0],
 };
 
+// --- UX redesign helpers (module-level) ---
+
+/** Format an ISO date (yyyy-MM-dd) as "15 Jan 1996"; empty when unparseable. */
+function formatShortDate(iso: string): string {
+  if (!iso) return '';
+  try {
+    return format(parse(iso, 'yyyy-MM-dd', new Date()), 'd MMM yyyy');
+  } catch {
+    return '';
+  }
+}
+
+/** Optional customer details, folded away until needed. Rendered twice —
+ *  in-flow on mobile, in the summary rail on desktop — from shared state. */
+function CustomerDetailsDisclosure(props: {
+  variant: 'mobile' | 'desktop';
+  name: string;
+  phone: string;
+  open: boolean;
+  onToggle: () => void;
+  onNameChange: (value: string) => void;
+  onPhoneChange: (value: string) => void;
+}) {
+  const { variant, name, phone, open, onToggle, onNameChange, onPhoneChange } = props;
+  const filled = Boolean(name.trim() || phone.trim());
+  return (
+    <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 space-y-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between text-left cursor-pointer"
+      >
+        <span className="text-sm font-bold text-brand-text">
+          Add customer details{' '}
+          {variant === 'mobile' && <span className="text-xs font-semibold text-slate-500">(optional — for the quotation)</span>}
+          {filled && <span className="ml-2 text-xs font-bold text-emerald-600">✓ Added</span>}
+        </span>
+        <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform flex-shrink-0", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="space-y-1 text-xs font-semibold text-brand-text">
+            Customer Name
+            <input type="text" autoComplete="name" value={name} onChange={e => onNameChange(e.target.value)} placeholder="Enter customer name" className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-brand-primary" />
+          </label>
+          <label className="space-y-1 text-xs font-semibold text-brand-text">
+            Mobile Number
+            <input type="tel" autoComplete="tel" inputMode="tel" value={phone} onChange={e => onPhoneChange(e.target.value)} placeholder="Enter mobile number" className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-brand-primary" />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Desktop summary rail: finished Step 1, collapsed into rows. */
+function AboutYouSummary(props: {
+  dob: string;
+  age: number;
+  gender: string;
+  issueDate: string;
+  onEdit: () => void;
+}) {
+  const { dob, age, gender, issueDate, onEdit } = props;
+  return (
+    <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold text-brand-text">About you</h3>
+        <button type="button" onClick={onEdit} className="text-xs font-bold text-brand-blue hover:underline cursor-pointer">Edit</button>
+      </div>
+      <div className="space-y-1.5 text-xs">
+        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">Date of birth</span><span className="font-bold text-slate-800">{formatShortDate(dob)}</span></div>
+        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">Age</span><span className="rounded-full bg-[#f0f1df] px-2.5 py-1 text-[11px] font-black text-brand-text">Age {age}</span></div>
+        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">Counted at</span><span className="font-bold text-slate-800">nearest birthday</span></div>
+        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">Gender</span><span className="font-bold text-slate-800">{gender}</span></div>
+        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">Issue date</span><span className="font-bold text-slate-800">{formatShortDate(issueDate)}</span></div>
+      </div>
+    </div>
+  );
+}
+
+/** Desktop summary rail: finished Step 2, collapsed into rows. */
+function YourPlanSummary(props: {
+  planName: string;
+  amountLabel: string;
+  amount: string;
+  term: number;
+  paymentMethod: string;
+  onEdit: () => void;
+}) {
+  const { planName, amountLabel, amount, term, paymentMethod, onEdit } = props;
+  return (
+    <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold text-brand-text">Your plan</h3>
+        <button type="button" onClick={onEdit} className="text-xs font-bold text-brand-blue hover:underline cursor-pointer">Edit</button>
+      </div>
+      <div className="space-y-1.5 text-xs">
+        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">Plan</span><span className="font-bold text-slate-800 text-right">{planName}</span></div>
+        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">{amountLabel}</span><span className="font-bold text-slate-800">{amount}</span></div>
+        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">Term</span><span className="font-bold text-slate-800">{term} yrs</span></div>
+        <div className="flex items-center justify-between gap-2"><span className="text-slate-500">Payment</span><span className="font-bold text-slate-800">{paymentMethod || '—'}</span></div>
+      </div>
+    </div>
+  );
+}
+
 export default function Calculator() {
   const [input, setInput] = useState<CalculationInput>(INITIAL_INPUT);
 
@@ -185,9 +318,14 @@ export default function Calculator() {
     setComboSdppDeposit(0);
     setComboSdppDailyHospitalCoverage(0);
     setComboSdppCustomRate('');
+    setWizardStep(1);
+    setShowAllPlans(false);
+    setCustomerDetailsOpen(false);
   };
   const [isCompareMode, setIsCompareMode] = useState<boolean>(false);
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
+  const [showAllPlans, setShowAllPlans] = useState(false);
+  const [customerDetailsOpen, setCustomerDetailsOpen] = useState(false);
   const [previewSection, setPreviewSection] = useState<'quotation' | 'term' | 'policy' | 'liquidity'>('quotation');
   const [liquidityDetails, setLiquidityDetails] = useState(false);
   const [ciInfoView, setCiInfoView] = useState<'classic' | 'standard' | null>(null);
@@ -249,22 +387,9 @@ export default function Calculator() {
   };
   const [showQuotationModal, setShowQuotationModal] = useState<boolean>(false);
   const [showTermComparisonModal, setShowTermComparisonModal] = useState<boolean>(false);
-  const [showPlanMenu, setShowPlanMenu] = useState(false);
   const [showEmergency, setShowEmergency] = useState(false);
   const [isEditingTerm, setIsEditingTerm] = useState(false);
   const [isEditingSA, setIsEditingSA] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // Close menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setShowPlanMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   useEffect(() => {
     // Scroll to top when state changes
@@ -642,10 +767,8 @@ export default function Calculator() {
   );
 
   const renderInputs = () => {
-    const primaryPayable = selectedProduct?.totalPremium?.[input.paymentMethod] || 0;
-    const totalPayableAmount = isComboEnabled ? primaryPayable + (comboSdppDeposit || 0) : primaryPayable;
-
-    // Progressive Step Completion Flags
+    // Progressive Step Completion Flags — board order: product → goal →
+    // amount → term → mode. (The old order was mode → term → amount.)
     const isStep1Complete = Boolean(input.dob && input.gender && input.age > 0);
     const isStep2Complete = Boolean(isStep1Complete && selectedProductId);
     const isStep3Complete = Boolean(isStep2Complete && (
@@ -654,19 +777,15 @@ export default function Calculator() {
         : Boolean(input.inputMode)
     ));
     const isStep4Complete = Boolean(isStep3Complete && (
-      isSDPP 
-        ? Boolean(input.term > 0)
-        : Boolean(input.paymentMethod || isSinglePremiumProduct)
-    ));
-    const isStep5Complete = Boolean(isStep4Complete && (
-      isSDPP 
-        ? Boolean(input.paymentMethod)
-        : Boolean(input.term > 0)
-    ));
-    const isStep6Complete = Boolean(isStep5Complete && (
-      isSDPP 
-        ? Boolean(input.targetPremium && input.targetPremium > 0 && (input.sdppPlan !== 'Elite' || (input.dailyHospitalCoverage && input.dailyHospitalCoverage >= 1000)))
+      isSDPP
+        ? Boolean(input.targetPremium && input.targetPremium > 0)
         : ((input.inputMode === 'SumAssured' && input.sumAssured > 0) || (input.inputMode === 'Premium' && input.targetPremium > 0))
+    ));
+    const isStep5Complete = Boolean(isStep4Complete && input.term > 0);
+    const isStep6Complete = Boolean(isStep5Complete && (
+      isSDPP
+        ? Boolean(input.paymentMethod && (input.sdppPlan !== 'Elite' || (input.dailyHospitalCoverage && input.dailyHospitalCoverage >= 1000)))
+        : Boolean(input.paymentMethod || isSinglePremiumProduct)
     ));
 
     // Combo Progressive Step Completion Flags
@@ -676,6 +795,48 @@ export default function Calculator() {
       isComboStep2Complete && (comboSdppPlan !== 'Elite' || comboSdppDailyHospitalCoverage > 0)
     );
     const isComboFullyComplete = !isComboEnabled || isComboStep3Complete;
+
+    // Board-derived values for the live premium bar + step-2 blocks
+    const issueYear = input.issueDate ? Number(input.issueDate.slice(0, 4)) || new Date().getFullYear() : new Date().getFullYear();
+    const effectivePaymentMethod: PlanFrequency | '' = input.paymentMethod || (isSinglePremiumProduct ? 'Single' : '');
+    const modePeriodWord = effectivePaymentMethod === 'Monthly' ? 'month' : effectivePaymentMethod === 'Quarterly' ? 'quarter' : effectivePaymentMethod === 'Half-yearly' ? '6 months' : effectivePaymentMethod === 'Yearly' ? 'year' : '';
+    const premiumPeriodLabel = effectivePaymentMethod === 'Single' ? 'one-time' : effectivePaymentMethod ? `/ ${modePeriodWord}` : '';
+    const modePaymentsPerYear = effectivePaymentMethod === 'Monthly' ? 12 : effectivePaymentMethod === 'Quarterly' ? 4 : effectivePaymentMethod === 'Half-yearly' ? 2 : 1;
+    const primaryPayableForBar = effectivePaymentMethod ? (selectedProduct?.totalPremium?.[effectivePaymentMethod] || 0) : 0;
+    const displayPremium = primaryPayableForBar + (isComboEnabled ? (comboSdppDeposit || 0) : 0);
+    const comboModeMultiplier = comboSdppPaymentMethod === 'Monthly' ? 12 : comboSdppPaymentMethod === 'Quarterly' ? 4 : comboSdppPaymentMethod === 'Half-yearly' ? 2 : 1;
+    const primaryTotalOverTerm = effectivePaymentMethod === 'Single' ? primaryPayableForBar : primaryPayableForBar * modePaymentsPerYear * input.term;
+    const comboTotalOverTerm = comboSdppDeposit * comboModeMultiplier * input.term;
+    const totalOverTerm = primaryTotalOverTerm + (isComboEnabled ? comboTotalOverTerm : 0);
+
+    // Plans visible on the cards: featured first; a selected non-featured
+    // plan stays visible when collapsed.
+    // Collapsed: featured plans in FEATURED order (S3PP first, per the
+    // board), with a selected non-featured plan kept visible at the end.
+    const visiblePlans = showAllPlans
+      ? PLAN_STRUCTURE
+      : PLAN_STRUCTURE.filter(p => FEATURED_PLAN_IDS.includes(p.id) || p.id === selectedProductId)
+          .sort((a, b) => {
+            const rank = (id: string) => {
+              const i = FEATURED_PLAN_IDS.indexOf(id);
+              return i === -1 ? FEATURED_PLAN_IDS.length : i;
+            };
+            return rank(a.id) - rank(b.id);
+          });
+
+    const ridersAvailable = !isSDPP && !isSinglePremiumProduct;
+
+    // Results gating + the bottom-bar action button (step 2 goes straight
+    // to results unless the combo P2 is still open).
+    const resultsBlocked = !isStep6Complete || !isComboFullyComplete || Object.keys(validationErrors).length > 0;
+    const step2GoesToResults = !(isComboEnabled && !isComboFullyComplete);
+    const actionLabel = wizardStep === 1 ? 'Continue →' : (wizardStep === 2 && !step2GoesToResults) ? 'Continue →' : 'See my benefits →';
+    const actionDisabled = wizardStep === 1 ? !isStep1Complete : wizardStep === 2 ? (step2GoesToResults ? resultsBlocked : !isStep6Complete) : resultsBlocked;
+    const handleActionClick = () => {
+      if (wizardStep === 1) setWizardStep(2);
+      else if (wizardStep === 2 && !step2GoesToResults) setWizardStep(3);
+      else { setPreviewSection('quotation'); setAppState('results'); }
+    };
 
     return (
       <div className="w-full max-w-5xl lg:max-w-7xl 2xl:max-w-[1550px] mx-auto space-y-4 my-auto">
@@ -709,6 +870,14 @@ export default function Calculator() {
                   <span className="text-[10px] md:text-xs font-black uppercase text-brand-primary tracking-wider">Dual-Policy Combo</span>
                 </div>
               )}
+              <button
+                type="button"
+                onClick={handleReset}
+                className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[10px] md:text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all cursor-pointer flex-shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+                Reset
+              </button>
             </div>
 
             {/* Radio Selectors inspired by the GPA Calculator Sample */}
@@ -742,17 +911,75 @@ export default function Calculator() {
             </div>
           </div>
 
-          <nav aria-label="Configuration steps" className="grid grid-cols-3 gap-2 rounded-xl border border-[#e5e8df] bg-[#f8f9f3] p-2">{(['Personal','Plan','Riders'] as const).map((name,index)=><button key={name} type="button" disabled={index===1&&!isStep1Complete || index===2&&!isStep6Complete} onClick={()=>setWizardStep((index+1) as 1|2|3)} className={cn('rounded-lg py-3 text-xs font-semibold disabled:opacity-40',wizardStep===index+1?'bg-brand-primary text-white shadow-sm':'text-brand-text hover:bg-white')}>{index+1}. {name}</button>)}</nav>
-          {/* Grid Layout for Policy Inputs */}
-          <div className={cn(
-            "grid grid-cols-1 gap-5 lg:gap-8 items-start transition-all duration-500",
-            isComboEnabled ? "lg:grid-cols-12" : "w-full"
-          )}>
-            {/* LEFT COLUMN: Policy 1 / Primary Plan Configuration */}
-            <div className={cn(
-              "space-y-4 sm:space-y-5",
-              isComboEnabled ? "lg:col-span-6 2xl:col-span-7" : "w-full"
-            )}>
+          <nav aria-label="Configuration steps" className="sticky top-0 z-20 grid grid-cols-3 gap-2 rounded-xl border border-[#e5e8df] bg-[#f8f9f3] p-2">
+            {([
+              { name: 'About you', disabled: false },
+              { name: 'Your plan', disabled: !isStep1Complete },
+              { name: 'Extra cover', disabled: !isStep6Complete },
+            ] as const).map((step, index) => (
+              <button
+                key={step.name}
+                type="button"
+                disabled={step.disabled}
+                aria-current={wizardStep === index + 1 ? 'step' : undefined}
+                onClick={() => setWizardStep((index + 1) as 1 | 2 | 3)}
+                className={cn(
+                  'rounded-lg py-3 text-xs font-semibold disabled:opacity-40 flex items-center justify-center gap-1.5',
+                  wizardStep === index + 1 ? 'bg-brand-primary text-white shadow-sm' : 'text-brand-text hover:bg-white'
+                )}
+              >
+                {/* Board: the current step shows its number, steps behind
+                    it show a check, future steps show a greyed number. */}
+                <span className={cn(
+                  'w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center flex-shrink-0',
+                  index + 1 < wizardStep
+                    ? 'bg-emerald-600 text-white'
+                    : wizardStep === index + 1
+                      ? 'bg-white/25 text-white'
+                      : 'bg-slate-200 text-slate-600'
+                )}>
+                  {index + 1 < wizardStep ? <Check className="w-3 h-3 stroke-[3]" /> : index + 1}
+                </span>
+                <span className="truncate"><span className="hidden lg:inline">{index + 1} · </span>{step.name}</span>
+              </button>
+            ))}
+          </nav>
+          {/* Grid Layout for Policy Inputs — summary rail (desktop) + main column */}
+          <div className="grid grid-cols-1 gap-5 lg:gap-8 items-start transition-all duration-500 lg:grid-cols-[300px_minmax(0,1fr)]">
+            {/* SUMMARY RAIL (desktop only): finished steps collapse into rows */}
+            <aside className="hidden lg:block space-y-4 lg:sticky lg:top-20">
+              {wizardStep > 1 && isStep1Complete && (
+                <AboutYouSummary
+                  dob={input.dob}
+                  age={input.age}
+                  gender={input.gender}
+                  issueDate={input.issueDate}
+                  onEdit={() => setWizardStep(1)}
+                />
+              )}
+              {wizardStep === 3 && isStep6Complete && (
+                <YourPlanSummary
+                  planName={selectedProduct?.productName || ''}
+                  amountLabel={isSDPP ? 'Deposit' : input.inputMode === 'Premium' ? 'Premium' : 'Cover'}
+                  amount={formatCurrency(isSDPP || input.inputMode === 'Premium' ? input.targetPremium : input.sumAssured)}
+                  term={input.term}
+                  paymentMethod={input.paymentMethod}
+                  onEdit={() => setWizardStep(2)}
+                />
+              )}
+              <CustomerDetailsDisclosure
+                variant="desktop"
+                name={input.name || ''}
+                phone={input.phone || ''}
+                open={customerDetailsOpen}
+                onToggle={() => setCustomerDetailsOpen(v => !v)}
+                onNameChange={(value) => handleInputChange('name', value)}
+                onPhoneChange={(value) => handleInputChange('phone', value)}
+              />
+            </aside>
+            {/* MAIN COLUMN: Policy 1 / Primary Plan Configuration */}
+            <div className="space-y-4 sm:space-y-5 min-w-0">
+              {isComboEnabled && (
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                 <div className="flex items-center gap-2.5">
                   <div className="w-7 h-7 rounded-full bg-brand-primary/10 border border-brand-primary/20 flex items-center justify-center text-brand-primary font-black text-xs">
@@ -771,258 +998,209 @@ export default function Calculator() {
                   </span>
                 )}
               </div>
+              )}
 
               <div className={wizardStep === 1 ? 'space-y-4' : 'hidden'}>
-              <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 space-y-3"><div><h4 className="text-sm font-bold text-brand-text">Customer Details <span className="text-xs font-medium text-slate-500">(Optional)</span></h4><p className="text-xs text-slate-500">These details will appear on the benefit illustration when provided.</p></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><label className="space-y-1 text-xs font-semibold text-brand-text">Customer Name<input type="text" autoComplete="name" value={input.name || ''} onChange={e=>handleInputChange('name',e.target.value)} placeholder="Enter customer name" className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-brand-primary"/></label><label className="space-y-1 text-xs font-semibold text-brand-text">Mobile Number<input type="tel" autoComplete="tel" inputMode="tel" value={input.phone || ''} onChange={e=>handleInputChange('phone',e.target.value)} placeholder="Enter mobile number" className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-brand-primary"/></label></div></div>
-              {/* STEP 1: IDENTITY (Gender, DOB, Age) & Issue Date */}
-              <div className={cn(
-                "p-4 rounded-2xl border transition-all duration-300 space-y-3",
-                isStep1Complete 
-                  ? "bg-emerald-50/30 border-emerald-300/80" 
-                  : "bg-slate-50/90 border-brand-primary/30 ring-2 ring-brand-primary/10 shadow-sm"
-              )}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={cn(
-                      "w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center",
-                      isStep1Complete ? "bg-emerald-600 text-white" : "bg-brand-primary text-white"
-                    )}>
-                      {isStep1Complete ? <Check className="w-3 h-3 stroke-[3]" /> : "1"}
-                    </span>
-                    <h4 className="text-xs font-black uppercase text-slate-900 tracking-wider">
-                      Issue Date, Gender & Age
-                    </h4>
-                  </div>
-                  {isStep1Complete && <span className="text-[10px] font-bold text-emerald-600 uppercase">Completed</span>}
+                {/* Who is this plan for? */}
+                <div>
+                  <h3 className="text-base font-bold text-brand-text">Who is this plan for?</h3>
+                  <p className="mt-0.5 text-xs text-slate-500">Start with the person to be covered. Everything else follows from this.</p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-1">
-                  {/* Issue Date */}
+                <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 space-y-4">
+                  {/* Date of birth */}
                   <div className="space-y-1">
                     <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
-                      <Calendar className="w-3 h-3 text-brand-primary" /> Issue Date
+                      <Calendar className="w-3 h-3 text-brand-primary" /> {selectedProductId.startsWith('scep_') ? 'Parent date of birth' : 'Date of birth'}
                     </label>
                     <input
                       type="date"
-                      value={input.issueDate}
-                      onChange={(e) => handleInputChange('issueDate', e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-full px-3 py-2 text-xs font-bold text-slate-800 focus:border-brand-primary outline-none transition-all"
+                      value={input.dob}
+                      onChange={(e) => handleInputChange('dob', e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-3 text-sm font-bold text-slate-800 focus:border-brand-primary outline-none transition-all"
                     />
                   </div>
 
+                  {/* Age — counted at the nearest birthday */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-[#f0f1df] px-3 py-1.5 text-xs font-black text-brand-text">
+                      {input.age ? `Age ${input.age}` : 'Age —'}
+                    </span>
+                    <span className="text-[11px] text-slate-500">Counted at your nearest birthday</span>
+                  </div>
+                  {validationErrors.age && <p className="text-[10px] text-red-500 font-bold italic">{validationErrors.age}</p>}
+
                   {/* Gender */}
                   <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
+                    <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
                       <CircleUser className="w-3 h-3 text-brand-primary" /> Gender
-                    </label>
-                    <div className="grid grid-cols-2 gap-1">
+                    </span>
+                    <div className="grid grid-cols-2 gap-2 max-w-xs">
                       {GENDERS.map(g => (
                         <button
                           key={g}
                           type="button"
                           onClick={() => handleInputChange('gender', g)}
                           className={cn(
-                            "py-2 px-1.5 rounded-full border text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center",
+                            "py-2.5 px-3 rounded-full border text-xs font-bold transition-all cursor-pointer",
                             input.gender === g
                               ? "bg-brand-primary text-white border-brand-primary shadow-sm"
                               : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
                           )}
                         >
-                          {g === 'Male' ? '♂ ' : '♀ '}{g}
+                          {g}
                         </button>
                       ))}
                     </div>
                   </div>
-
-                  {/* DOB */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
-                      <Calendar className="w-3 h-3 text-brand-primary" /> {selectedProductId.startsWith('scep_') ? "Parent DOB" : "Date of Birth"}
-                    </label>
-                    <input
-                      type="date"
-                      value={input.dob}
-                      onChange={(e) => handleInputChange('dob', e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-full px-3 py-2 text-xs font-bold text-slate-800 focus:border-brand-primary outline-none transition-all"
-                    />
-                  </div>
-
-                  {/* Child Age (SCEP plans only - certificate rules are validated) */}
-                  {selectedProductId.startsWith('scep') && (
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
-                        <User className="w-3 h-3 text-brand-primary" /> Child's Age (Years)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={25}
-                        value={input.childAge || ''}
-                        placeholder="e.g. 8"
-                        onChange={(e) => handleInputChange('childAge', Number(e.target.value))}
-                        className="w-full bg-white border border-slate-200 rounded-full px-3 py-2 text-xs font-bold text-slate-800 focus:border-brand-primary outline-none transition-all"
-                      />
-                      <p className="text-[9px] text-slate-400 font-medium">Child must be 30 days-15 years at entry, and child age + term must not exceed 25.</p>
-                    </div>
-                  )}
-
-                  {/* Calculated Age */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
-                      <User className="w-3 h-3 text-brand-primary" /> Age
-                    </label>
-                    <div className="w-full bg-slate-100 border border-slate-200 rounded-full px-3 py-2 text-xs font-mono font-black text-slate-900 flex items-center justify-between">
-                      <span>{input.age ? `${input.age} Yrs` : 'Select DOB'}</span>
-                    </div>
-                    {validationErrors.age && <p className="text-[10px] text-red-500 font-bold italic">{validationErrors.age}</p>}
-                  </div>
                 </div>
-              </div>
+
+                {/* Optional customer details — mobile only; desktop shows
+                    this in the summary rail. */}
+                <div className="lg:hidden">
+                  <CustomerDetailsDisclosure
+                    variant="mobile"
+                    name={input.name || ''}
+                    phone={input.phone || ''}
+                    open={customerDetailsOpen}
+                    onToggle={() => setCustomerDetailsOpen(v => !v)}
+                    onNameChange={(value) => handleInputChange('name', value)}
+                    onPhoneChange={(value) => handleInputChange('phone', value)}
+                  />
+                </div>
+
+                {/* Issue date */}
+                <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-bold text-brand-text">Issue date</div>
+                  </div>
+                  <input
+                    type="date"
+                    value={input.issueDate}
+                    onChange={(e) => handleInputChange('issueDate', e.target.value)}
+                    className="bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 focus:border-brand-primary outline-none transition-all sm:text-right"
+                  />
+                </div>
 
               </div>
               <div className={wizardStep === 2 ? 'space-y-4' : 'hidden'}>
-              {/* STEP 2: PRODUCT SELECTION */}
-              <div className={cn(
-                "p-4 rounded-2xl border transition-all duration-300 space-y-3",
-                !isStep1Complete
-                  ? "bg-slate-50/40 border-slate-200/60 opacity-35 pointer-events-none cursor-not-allowed filter blur-[0.2px] select-none"
-                  : isStep2Complete
-                  ? "bg-emerald-50/30 border-emerald-300/80 opacity-100"
-                  : "bg-slate-50/90 border-brand-primary/30 ring-2 ring-brand-primary/10 shadow-sm opacity-100"
-              )}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={cn(
-                      "w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center",
-                      isStep2Complete ? "bg-emerald-600 text-white" : "bg-brand-primary text-white"
-                    )}>
-                      {isStep2Complete ? <Check className="w-3 h-3 stroke-[3]" /> : "2"}
-                    </span>
-                    <h4 className="text-xs font-black uppercase text-slate-900 tracking-wider">
-                      Insurance Product Selection
-                    </h4>
-                  </div>
-                  {!isStep1Complete && <span className="text-[10px] font-bold text-slate-400 uppercase">Complete Step 1 First</span>}
-                  {isStep2Complete && <span className="text-[10px] font-bold text-emerald-600 uppercase">Completed</span>}
-                </div>
-
-                <div className="relative group" ref={menuRef}>
-                  <button
-                    type="button"
-                    disabled={!isStep1Complete}
-                    onClick={() => setShowPlanMenu(!showPlanMenu)}
-                    className="w-full bg-white border border-slate-200 rounded-full px-5 py-2.5 text-xs sm:text-sm font-black text-slate-900 flex items-center justify-between group hover:border-brand-primary focus:bg-white transition-all text-left shadow-sm cursor-pointer"
-                  >
-                    <span className={cn("pr-2 line-clamp-1", !selectedProduct && "text-slate-400 font-medium italic")}>
-                      {selectedProduct?.productName || "-- Select Insurance Product --"}
-                    </span>
-                    <ChevronDown className={cn("w-4 h-4 text-slate-400 group-hover:text-brand-primary transition-all flex-shrink-0", showPlanMenu && "rotate-180")} />
-                  </button>
-
-                  <AnimatePresence>
-                    {showPlanMenu && (
-                      <motion.div 
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        className="absolute top-full mt-2 right-0 w-full bg-white border border-slate-200 rounded-2xl shadow-2xl z-[100] py-2 max-h-[300px] overflow-y-auto custom-scrollbar"
+              {/* WHICH PLAN — product cards, not a dropdown */}
+              <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 space-y-3">
+                <h3 className="text-base font-bold text-brand-text">Which plan fits the goal?</h3>
+                <div className="space-y-2">
+                  {visiblePlans.map((item) => {
+                    const info = PLAN_CARD_INFO[item.id];
+                    const isSelected = selectedProductId === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() => {
+                          if (item.id === 'sdpp') {
+                            window.location.assign('https://sdpp-value-projection.vercel.app/');
+                            return;
+                          }
+                          setSelectedProductId(item.id);
+                          if (item.id === 'sspe' || item.id === 'scep_single') {
+                            handleInputChange('paymentMethod', 'Single');
+                          }
+                        }}
+                        className={cn(
+                          "w-full rounded-2xl border p-3.5 text-left transition-all flex items-start gap-3 cursor-pointer",
+                          isSelected
+                            ? "bg-brand-primary/5 border-brand-primary shadow-sm"
+                            : "bg-white border-slate-200 hover:border-brand-primary/50 hover:bg-slate-50"
+                        )}
                       >
-                        <div className="px-5 py-1">
-                          <h4 className="text-[10px] font-black text-brand-primary uppercase tracking-widest mb-1">Select A Product Plan</h4>
-                        </div>
-                        <div className="space-y-0.5">
-                          {PLAN_STRUCTURE.map((item) => {
-                            const isSelected = selectedProductId === item.id;
-                            return (
-                              <button
-                                key={item.id}
-                                type="button"
-                                onClick={() => { 
-                                  if (item.id === 'sdpp') {
-                                    window.location.assign('https://sdpp-value-projection.vercel.app/');
-                                    return;
-                                  }
-                                  setSelectedProductId(item.id);
-                                  setShowPlanMenu(false);
-                                  if (item.id === 'sspe' || item.id === 'scep_single') {
-                                    handleInputChange('paymentMethod', 'Single');
-                                  }
-                                }}
-                                className={cn(
-                                  "w-full px-5 py-2.5 text-left transition-all flex items-center justify-between group/item cursor-pointer text-xs font-semibold",
-                                  isSelected 
-                                    ? "bg-brand-primary text-white font-bold" 
-                                    : "text-slate-700 hover:bg-slate-50 hover:text-brand-primary"
-                                )}
-                              >
-                                <span>{item.name}</span>
-                                {isSelected && <Check className="w-4 h-4 text-white" />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                        <span className={cn(
+                          "mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0",
+                          isSelected ? "border-brand-primary bg-brand-primary" : "border-slate-300 bg-white"
+                        )}>
+                          {isSelected && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-sm font-bold text-slate-900">{item.name}</span>
+                          <span className="block text-xs text-slate-500 mt-0.5">{info.tagline}</span>
+                          <span className="bangla-gloss block text-xs text-brand-primary mt-0.5">{info.gloss}</span>
+                          {item.id === 'sdpp' && (
+                            <span className="block text-[11px] text-slate-400 mt-0.5">Opens the SDPP app ↗</span>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAllPlans(v => !v)}
+                  className="text-xs font-bold text-brand-blue hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  {showAllPlans ? 'Show fewer plans' : 'Show all plans'}
+                  <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", showAllPlans && "rotate-180")} />
+                </button>
+
+                {/* Child's age — only for Child Education plans */}
+                {selectedProductId.startsWith('scep') && (
+                  <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
+                      <User className="w-3 h-3 text-brand-primary" /> Child's Age (Years)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={25}
+                      value={input.childAge || ''}
+                      placeholder="e.g. 8"
+                      onChange={(e) => handleInputChange('childAge', Number(e.target.value))}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-3 text-sm font-bold text-slate-800 focus:border-brand-primary outline-none transition-all"
+                    />
+                    <p className="text-[11px] text-slate-500">Child must be 30 days-15 years at entry, and child age + term must not exceed 25.</p>
+                    {validationErrors.childAge && <p className="text-[10px] text-red-500 font-bold italic">{validationErrors.childAge}</p>}
+                  </div>
+                )}
               </div>
 
-              {/* STEP 3: CALCULATION GOAL / SDPP PLAN CATEGORY */}
+              {/* HOW TO START — goal toggle + amount */}
               <div className={cn(
-                "p-4 rounded-2xl border transition-all duration-300 space-y-3",
-                !isStep2Complete
-                  ? "bg-slate-50/40 border-slate-200/60 opacity-35 pointer-events-none cursor-not-allowed filter blur-[0.2px] select-none"
-                  : isStep3Complete
-                  ? "bg-emerald-50/30 border-emerald-300/80 opacity-100"
-                  : "bg-slate-50/90 border-brand-primary/30 ring-2 ring-brand-primary/10 shadow-sm opacity-100"
+                "rounded-2xl border border-[#e5e8df] bg-white p-4 space-y-3 transition-opacity",
+                !isStep2Complete && "opacity-50 pointer-events-none"
               )}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={cn(
-                      "w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center",
-                      isStep3Complete ? "bg-emerald-600 text-white" : "bg-brand-primary text-white"
-                    )}>
-                      {isStep3Complete ? <Check className="w-3 h-3 stroke-[3]" /> : "3"}
-                    </span>
-                    <h4 className="text-xs font-black uppercase text-slate-900 tracking-wider">
-                      {isSDPP ? "SDPP Plan Category" : "Calculation Goal"}
-                    </h4>
-                  </div>
-                  {!isStep2Complete && <span className="text-[10px] font-bold text-slate-400 uppercase">Select Product First</span>}
-                  {isStep3Complete && <span className="text-[10px] font-bold text-emerald-600 uppercase">Completed</span>}
-                </div>
+                <h3 className="text-base font-bold text-brand-text">How do you want to start?</h3>
 
                 {!isSDPP ? (
-                  <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       disabled={!isStep2Complete}
+                      aria-pressed={input.inputMode === 'SumAssured'}
                       onClick={() => handleInputChange('inputMode', 'SumAssured')}
                       className={cn(
-                        "py-2.5 px-3 rounded-xl border text-[11px] font-bold tracking-wide transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm",
-                        input.inputMode === 'SumAssured' 
-                          ? "bg-brand-primary text-white border-brand-primary shadow-sm" 
+                        "py-3 px-3 rounded-2xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                        input.inputMode === 'SumAssured'
+                          ? "bg-brand-primary text-white border-brand-primary shadow-sm"
                           : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
                       )}
                     >
-                      <Shield className="w-3.5 h-3.5" /> <span className="sm:hidden">Sum Assured</span><span className="hidden sm:inline">Fix Base Coverage (SA)</span>
+                      I want cover of…
                     </button>
                     <button
                       type="button"
                       disabled={!isStep2Complete}
+                      aria-pressed={input.inputMode === 'Premium'}
                       onClick={() => handleInputChange('inputMode', 'Premium')}
                       className={cn(
-                        "py-2.5 px-3 rounded-full border text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer",
-                        input.inputMode === 'Premium' 
-                          ? "bg-brand-primary text-white border-brand-primary shadow-sm" 
+                        "py-3 px-3 rounded-2xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                        input.inputMode === 'Premium'
+                          ? "bg-brand-primary text-white border-brand-primary shadow-sm"
                           : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
                       )}
                     >
-                      <DollarSign className="w-3.5 h-3.5" /> <span className="sm:hidden">Premium</span><span className="hidden sm:inline">Fix Target Premium</span>
+                      I can pay… a year
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-3 pt-1">
+                  <div className="space-y-3">
                     {/* SDPP Plan Category Selection */}
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block">
@@ -1058,69 +1236,216 @@ export default function Calculator() {
                     </div>
                   </div>
                 )}
+
+                {/* Amount */}
+                <div className={cn("space-y-2", !isStep3Complete && "opacity-50 pointer-events-none")}>
+                  <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
+                    {isSDPP ? `${input.paymentMethod || 'Monthly'} Deposit Amount` : (input.inputMode === 'SumAssured' ? 'Cover amount (Sum Assured)' : 'Premium amount')}
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">৳</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      disabled={!isStep3Complete}
+                      value={input.inputMode === 'SumAssured' ? (input.sumAssured === 0 ? '' : input.sumAssured) : (input.targetPremium === 0 ? '' : input.targetPremium)}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? 0 : Number(e.target.value);
+                        if (input.inputMode === 'SumAssured') handleInputChange('sumAssured', val);
+                        else handleInputChange('targetPremium', val);
+                      }}
+                      placeholder="Enter amount"
+                      className={cn(
+                        "w-full bg-white border rounded-xl pl-9 pr-4 py-3 text-sm font-mono font-black text-slate-900 outline-none transition-all focus:border-brand-primary",
+                        (validationErrors.sumAssured || validationErrors.targetPremium) ? "border-red-500" : "border-slate-200"
+                      )}
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    {!isSDPP && input.inputMode === 'SumAssured'
+                      ? 'type or pick below'
+                      : input.paymentMethod === 'Single'
+                        ? 'one-time payment'
+                        : input.paymentMethod
+                          ? `per ${modePeriodWord}`
+                          : 'per payment — choose how often to pay below'}
+                  </p>
+                  {(validationErrors.sumAssured || validationErrors.targetPremium) && (
+                    <p className="text-[10px] text-red-500 font-bold italic">
+                      {validationErrors.sumAssured || validationErrors.targetPremium}
+                    </p>
+                  )}
+
+                  {/* Quick-pick amounts — Sum Assured mode, non-SDPP */}
+                  {!isSDPP && input.inputMode === 'SumAssured' && (
+                    <div className="flex flex-wrap gap-2">
+                      {QUICK_PICK_AMOUNTS.map(({ value, label }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          disabled={!isStep3Complete}
+                          onClick={() => handleInputChange('sumAssured', value)}
+                          aria-pressed={input.sumAssured === value}
+                          className={cn(
+                            "px-3.5 py-2 rounded-full border text-xs font-bold transition-all cursor-pointer",
+                            input.sumAssured === value
+                              ? "bg-brand-primary text-white border-brand-primary shadow-sm"
+                              : "bg-white border-slate-200 text-slate-700 hover:bg-slate-100"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        disabled={!isStep3Complete}
+                        onClick={() => handleInputChange('sumAssured', 5000000)}
+                        aria-pressed={input.sumAssured === 5000000}
+                        className={cn(
+                          "hidden lg:inline-flex px-3.5 py-2 rounded-full border text-xs font-bold transition-all cursor-pointer items-center",
+                          input.sumAssured === 5000000
+                            ? "bg-brand-primary text-white border-brand-primary shadow-sm"
+                            : "bg-white border-slate-200 text-slate-700 hover:bg-slate-100"
+                        )}
+                      >
+                        ৳50,00,000
+                      </button>
+                    </div>
+                  )}
+
+                  {/* IF SDPP and Elite: Hospital Coverage, Critical Illness, and Interest Rate inputs */}
+                  {isSDPP && input.sdppPlan === 'Elite' && (() => {
+                    const depositFreq = input.paymentMethod || 'Monthly';
+                    const yearlyMult = depositFreq === 'Yearly' ? 1 : depositFreq === 'Half-yearly' ? 2 : depositFreq === 'Quarterly' ? 4 : 12;
+                    const annualDepositAmt = (input.targetPremium || 0) * yearlyMult;
+                    const calculatedSumAssured = annualDepositAmt * (input.term || 0);
+                    const maxDailyHospital = Math.min(25000, Math.round(calculatedSumAssured * 0.02));
+
+                    const hiPremium = sdppData?.hiModePremium || 0;
+                    const ciPremium = sdppData?.ciModePremium || 0;
+
+                    return (
+                      <div className="space-y-4 pt-3 border-t border-slate-100 mt-2">
+                        {/* Daily Hospital Coverage */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
+                              <Activity className="w-3.5 h-3.5 text-brand-primary" /> Daily Hospital Coverage Amount (BDT)
+                            </label>
+                            {hiPremium > 0 && (
+                              <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded border border-blue-200">
+                                Rider Premium: +{formatCurrency(hiPremium)} / {depositFreq}
+                              </span>
+                            )}
+                          </div>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              value={input.dailyHospitalCoverage || ''}
+                              onChange={(e) => handleInputChange('dailyHospitalCoverage', Number(e.target.value))}
+                              placeholder={`Min ৳1,000 - Max ৳${maxDailyHospital > 0 ? maxDailyHospital.toLocaleString() : '25,000'}/day`}
+                              className="w-full bg-white border border-slate-200 rounded-full px-4 py-2 text-xs font-mono font-black text-slate-900 outline-none focus:border-brand-primary"
+                            />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase">BDT/Day</span>
+                          </div>
+                          <p className="text-[9px] text-slate-500 font-medium italic">
+                            Min ৳1,000 | Policy Max: ৳{maxDailyHospital > 0 ? maxDailyHospital.toLocaleString() : '25,000'}/day (2% of Sum Assured ৳{calculatedSumAssured.toLocaleString()}, max ৳25,000/day)
+                          </p>
+                        </div>
+
+                        {/* Active Critical Illness (15 Diseases) for Elite Plan */}
+                        <div className="bg-amber-50/60 p-3.5 rounded-2xl border border-amber-200/80 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Shield className="w-4 h-4 text-amber-600 shrink-0" />
+                            <div>
+                              <span className="text-xs font-black text-amber-900 uppercase tracking-wider block">
+                                Active Critical Illness Rider (15 Diseases)
+                              </span>
+                              <span className="text-[10px] text-amber-700 font-semibold block">
+                                Included in Elite Plan
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="text-xs font-mono font-bold text-amber-900 bg-amber-100 px-2.5 py-1 rounded border border-amber-300 block">
+                              +{formatCurrency(ciPremium)} / {depositFreq}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Expected Return Rate Input */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
+                            <Target className="w-3.5 h-3.5 text-brand-primary" /> Expected Return / Interest Rate % (Optional)
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={input.customInterestRate || ''}
+                              onChange={(e) => handleInputChange('customInterestRate', e.target.value === '' ? undefined : Number(e.target.value))}
+                              placeholder="Optional (Default 7% - 9% Range)"
+                              className="w-full bg-white border border-slate-200 rounded-full px-4 py-2 text-xs font-mono font-black text-slate-900 outline-none focus:border-brand-primary"
+                            />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">%</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
 
-              {/* STEP 4: POLICY TERM / PREMIUM MODE */}
-              <div className={cn(
-                "p-4 rounded-2xl border transition-all duration-300 space-y-3",
-                !isStep3Complete
-                  ? "bg-slate-50/40 border-slate-200/60 opacity-35 pointer-events-none cursor-not-allowed filter blur-[0.2px] select-none"
-                  : isStep4Complete
-                  ? "bg-emerald-50/30 border-emerald-300/80 opacity-100"
-                  : "bg-slate-50/90 border-brand-primary/30 ring-2 ring-brand-primary/10 shadow-sm opacity-100"
-              )}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={cn(
-                      "w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center",
-                      isStep4Complete ? "bg-emerald-600 text-white" : "bg-brand-primary text-white"
-                    )}>
-                      {isStep4Complete ? <Check className="w-3 h-3 stroke-[3]" /> : "4"}
-                    </span>
-                    <h4 className="text-xs font-black uppercase text-slate-900 tracking-wider">
-                      {isSDPP ? "Policy Term Duration" : "Premium Payment Mode"}
-                    </h4>
+              {/* FOR HOW LONG — term chips + payment mode */}
+              <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 space-y-4">
+                <div className={cn("space-y-2", !isStep4Complete && "opacity-50 pointer-events-none")}>
+                  <h3 className="text-base font-bold text-brand-text">For how long?</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {currentRules.terms.map((t: number) => (
+                      <button
+                        key={t}
+                        type="button"
+                        disabled={!isStep4Complete}
+                        aria-pressed={input.term === t}
+                        onClick={() => handleInputChange('term', t)}
+                        className={cn(
+                          "px-3.5 py-2 rounded-full border text-xs font-bold transition-all cursor-pointer",
+                          input.term === t
+                            ? "bg-brand-primary text-white border-brand-primary shadow-sm"
+                            : "bg-white border-slate-200 text-slate-700 hover:bg-slate-100"
+                        )}
+                      >
+                        {t} yrs
+                      </button>
+                    ))}
                   </div>
-                  {!isStep3Complete && <span className="text-[10px] font-bold text-slate-400 uppercase">Select Plan First</span>}
-                  {isStep4Complete && <span className="text-[10px] font-bold text-emerald-600 uppercase">Completed</span>}
+                  {validationErrors.term && <p className="text-[10px] text-red-500 font-bold italic">{validationErrors.term}</p>}
+                  {input.term > 0 && (
+                    <p className="text-xs text-slate-600">Maturity in <b className="text-slate-900">{issueYear + input.term}</b> — you will be <b className="text-slate-900">{input.age + input.term}</b>.</p>
+                  )}
                 </div>
 
-                {isSDPP ? (
-                  <div className="relative pt-1">
-                    <select
-                      value={input.term}
-                      disabled={!isStep3Complete}
-                      onChange={(e) => handleInputChange('term', Number(e.target.value))}
-                      className={cn(
-                        "w-full bg-white border rounded-full px-5 py-2.5 text-xs sm:text-sm font-black text-slate-900 outline-none transition-all appearance-none cursor-pointer focus:border-brand-primary",
-                        validationErrors.term ? "border-red-500" : "border-slate-200"
-                      )}
-                    >
-                      <option value={0} disabled className="text-slate-400">-- Select Policy Term --</option>
-                      {currentRules.terms.map((t: number) => (
-                        <option key={t} value={t} className="text-slate-800 font-sans font-bold">
-                          {t} Years
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="w-4 h-4 text-slate-400 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {FREQUENCIES.map(f => {
-                      const isApplicable = isSinglePremiumProduct ? f === 'Single' : f !== 'Single';
+                <div className={cn("space-y-2", !isStep5Complete && "opacity-50 pointer-events-none")}>
+                  <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">How often to pay</label>
+                  <div className="flex flex-wrap gap-2">
+                    {MODE_DISPLAY_ORDER.map(f => {
+                      const isApplicable = isSDPP
+                        ? f !== 'Single'
+                        : isSinglePremiumProduct ? f === 'Single' : f !== 'Single';
                       if (!isApplicable) return null;
                       return (
                         <button
                           key={f}
                           type="button"
-                          disabled={!isStep3Complete}
+                          disabled={!isStep5Complete}
+                          aria-pressed={input.paymentMethod === f}
                           onClick={() => handleInputChange('paymentMethod', f)}
                           className={cn(
-                            "flex-1 min-w-[70px] py-2.5 rounded-full border text-[11px] font-black uppercase tracking-wider transition-all text-center cursor-pointer",
-                            input.paymentMethod === f 
-                              ? "bg-brand-primary border-brand-primary text-white shadow-sm" 
-                              : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
+                            "px-3.5 py-2 rounded-full border text-xs font-bold transition-all cursor-pointer",
+                            input.paymentMethod === f
+                              ? "bg-brand-primary text-white border-brand-primary shadow-sm"
+                              : "bg-white border-slate-200 text-slate-700 hover:bg-slate-100"
                           )}
                         >
                           {f}
@@ -1128,213 +1453,27 @@ export default function Calculator() {
                       );
                     })}
                   </div>
-                )}
-                {isSDPP && validationErrors.term && <p className="text-[10px] text-red-500 font-bold italic px-2">{validationErrors.term}</p>}
+                </div>
               </div>
 
-              {/* STEP 5: PREMIUM MODE / POLICY TERM */}
-              <div className={cn(
-                "p-4 rounded-2xl border transition-all duration-300 space-y-3",
-                !isStep4Complete
-                  ? "bg-slate-50/40 border-slate-200/60 opacity-35 pointer-events-none cursor-not-allowed filter blur-[0.2px] select-none"
-                  : isStep5Complete
-                  ? "bg-emerald-50/30 border-emerald-300/80 opacity-100"
-                  : "bg-slate-50/90 border-brand-primary/30 ring-2 ring-brand-primary/10 shadow-sm opacity-100"
-              )}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={cn(
-                      "w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center",
-                      isStep5Complete ? "bg-emerald-600 text-white" : "bg-brand-primary text-white"
-                    )}>
-                      {isStep5Complete ? <Check className="w-3 h-3 stroke-[3]" /> : "5"}
-                    </span>
-                    <h4 className="text-xs font-black uppercase text-slate-900 tracking-wider">
-                      {isSDPP ? "Premium Payment Mode" : "Policy Term Duration"}
-                    </h4>
+              {/* NEXT · STEP 3 — desktop preview card + shortcut to the rider step */}
+              {ridersAvailable && isStep6Complete && (
+                <div className="hidden lg:block rounded-2xl border border-[#e5e8df] bg-white p-4 space-y-2">
+                  <h3 className="text-sm font-bold text-brand-text">Next · Step 3 — Extra cover</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {['Critical Illness — Classic', 'Critical Illness — Standard', 'Accidental Protection'].map(label => (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => setWizardStep(3)}
+                        className="px-3 py-1.5 rounded-full border border-slate-200 bg-white text-[11px] font-bold text-slate-700 hover:border-brand-primary/50 hover:text-brand-primary transition-all cursor-pointer"
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                  {!isStep4Complete && <span className="text-[10px] font-bold text-slate-400 uppercase">Select Term First</span>}
-                  {isStep5Complete && <span className="text-[10px] font-bold text-emerald-600 uppercase">Completed</span>}
                 </div>
-
-                {isSDPP ? (
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {FREQUENCIES.map(f => {
-                      if (f === 'Single') return null;
-                      return (
-                        <button
-                          key={f}
-                          type="button"
-                          disabled={!isStep4Complete}
-                          onClick={() => handleInputChange('paymentMethod', f)}
-                          className={cn(
-                            "flex-1 min-w-[70px] py-2.5 rounded-full border text-[11px] font-black uppercase tracking-wider transition-all text-center cursor-pointer",
-                            input.paymentMethod === f 
-                              ? "bg-brand-primary border-brand-primary text-white shadow-sm" 
-                              : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
-                          )}
-                        >
-                          {f}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="relative pt-1">
-                    <select
-                      value={input.term}
-                      disabled={!isStep4Complete}
-                      onChange={(e) => handleInputChange('term', Number(e.target.value))}
-                      className={cn(
-                        "w-full bg-white border rounded-full px-5 py-2.5 text-xs sm:text-sm font-black text-slate-900 outline-none transition-all appearance-none cursor-pointer focus:border-brand-primary",
-                        validationErrors.term ? "border-red-500" : "border-slate-200"
-                      )}
-                    >
-                      <option value={0} disabled className="text-slate-400">-- Select Policy Term --</option>
-                      {currentRules.terms.map((t: number) => (
-                        <option key={t} value={t} className="text-slate-800 font-sans font-bold">
-                          {t} Years
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="w-4 h-4 text-slate-400 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  </div>
-                )}
-                {!isSDPP && validationErrors.term && <p className="text-[10px] text-red-500 font-bold italic px-2">{validationErrors.term}</p>}
-              </div>
-
-              {/* STEP 6: DEPOSIT AMOUNT / BASE COVERAGE */}
-              <div className={cn(
-                "p-4 rounded-2xl border transition-all duration-300 space-y-3",
-                !isStep5Complete
-                  ? "bg-slate-50/40 border-slate-200/60 opacity-35 pointer-events-none cursor-not-allowed filter blur-[0.2px] select-none"
-                  : isStep6Complete
-                  ? "bg-emerald-50/30 border-emerald-300/80 opacity-100"
-                  : "bg-slate-50/90 border-brand-primary/30 ring-2 ring-brand-primary/10 shadow-sm opacity-100"
-              )}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={cn(
-                      "w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center",
-                      isStep6Complete ? "bg-emerald-600 text-white" : "bg-brand-primary text-white"
-                    )}>
-                      {isStep6Complete ? <Check className="w-3 h-3 stroke-[3]" /> : "6"}
-                    </span>
-                    <h4 className="text-xs font-black uppercase text-slate-900 tracking-wider">
-                      {isSDPP ? `${input.paymentMethod || 'Monthly'} Deposit Amount` : (input.inputMode === 'SumAssured' ? 'Base Coverage (SA)' : 'Target Premium Amount')}
-                    </h4>
-                  </div>
-                  {!isStep5Complete && <span className="text-[10px] font-bold text-slate-400 uppercase">Select Mode First</span>}
-                  {isStep6Complete && <span className="text-[10px] font-bold text-emerald-600 uppercase">Completed</span>}
-                </div>
-
-                <div className="relative pt-1">
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    disabled={!isStep5Complete}
-                    value={input.inputMode === 'SumAssured' ? (input.sumAssured === 0 ? '' : input.sumAssured) : (input.targetPremium === 0 ? '' : input.targetPremium)}
-                    onChange={(e) => {
-                      const val = e.target.value === '' ? 0 : Number(e.target.value);
-                      if (input.inputMode === 'SumAssured') handleInputChange('sumAssured', val);
-                      else handleInputChange('targetPremium', val);
-                    }}
-                    placeholder="Enter amount (BDT)"
-                    className={cn(
-                      "w-full bg-white border rounded-full px-5 py-2.5 text-xs sm:text-sm font-mono font-black text-slate-900 outline-none transition-all focus:border-brand-primary",
-                      (validationErrors.sumAssured || validationErrors.targetPremium) ? "border-red-500" : "border-slate-200"
-                    )}
-                  />
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 uppercase">BDT</span>
-                </div>
-                {(validationErrors.sumAssured || validationErrors.targetPremium) && (
-                  <p className="text-[10px] text-red-500 font-bold italic px-2">
-                    {validationErrors.sumAssured || validationErrors.targetPremium}
-                  </p>
-                )}
-
-                {/* IF SDPP and Elite: Hospital Coverage, Critical Illness, and Interest Rate inputs inside Step 6 */}
-                {isSDPP && input.sdppPlan === 'Elite' && (() => {
-                  const depositFreq = input.paymentMethod || 'Monthly';
-                  const yearlyMult = depositFreq === 'Yearly' ? 1 : depositFreq === 'Half-yearly' ? 2 : depositFreq === 'Quarterly' ? 4 : 12;
-                  const annualDepositAmt = (input.targetPremium || 0) * yearlyMult;
-                  const calculatedSumAssured = annualDepositAmt * (input.term || 0);
-                  const maxDailyHospital = Math.min(25000, Math.round(calculatedSumAssured * 0.02));
-                  
-                  const hiPremium = sdppData?.hiModePremium || 0;
-                  const ciPremium = sdppData?.ciModePremium || 0;
-
-                  return (
-                    <div className="space-y-4 pt-3 border-t border-slate-100 mt-2">
-                      {/* Daily Hospital Coverage */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
-                            <Activity className="w-3.5 h-3.5 text-brand-primary" /> Daily Hospital Coverage Amount (BDT)
-                          </label>
-                          {hiPremium > 0 && (
-                            <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded border border-blue-200">
-                              Rider Premium: +{formatCurrency(hiPremium)} / {depositFreq}
-                            </span>
-                          )}
-                        </div>
-                        <div className="relative">
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            value={input.dailyHospitalCoverage || ''}
-                            onChange={(e) => handleInputChange('dailyHospitalCoverage', Number(e.target.value))}
-                            placeholder={`Min ৳1,000 - Max ৳${maxDailyHospital > 0 ? maxDailyHospital.toLocaleString() : '25,000'}/day`}
-                            className="w-full bg-white border border-slate-200 rounded-full px-4 py-2 text-xs font-mono font-black text-slate-900 outline-none focus:border-brand-primary"
-                          />
-                          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase">BDT/Day</span>
-                        </div>
-                        <p className="text-[9px] text-slate-500 font-medium italic">
-                          Min ৳1,000 | Policy Max: ৳{maxDailyHospital > 0 ? maxDailyHospital.toLocaleString() : '25,000'}/day (2% of Sum Assured ৳{calculatedSumAssured.toLocaleString()}, max ৳25,000/day)
-                        </p>
-                      </div>
-
-                      {/* Active Critical Illness (15 Diseases) for Elite Plan */}
-                      <div className="bg-amber-50/60 p-3.5 rounded-2xl border border-amber-200/80 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Shield className="w-4 h-4 text-amber-600 shrink-0" />
-                          <div>
-                            <span className="text-xs font-black text-amber-900 uppercase tracking-wider block">
-                              Active Critical Illness Rider (15 Diseases)
-                            </span>
-                            <span className="text-[10px] text-amber-700 font-semibold block">
-                              Included in Elite Plan
-                            </span>
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <span className="text-xs font-mono font-bold text-amber-900 bg-amber-100 px-2.5 py-1 rounded border border-amber-300 block">
-                            +{formatCurrency(ciPremium)} / {depositFreq}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Expected Return Rate Input */}
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
-                          <Target className="w-3.5 h-3.5 text-brand-primary" /> Expected Return / Interest Rate % (Optional)
-                        </label>
-                        <div className="relative">
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={input.customInterestRate || ''}
-                            onChange={(e) => handleInputChange('customInterestRate', e.target.value === '' ? undefined : Number(e.target.value))}
-                            placeholder="Optional (Default 7% - 9% Range)"
-                            className="w-full bg-white border border-slate-200 rounded-full px-4 py-2 text-xs font-mono font-black text-slate-900 outline-none focus:border-brand-primary"
-                          />
-                          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">%</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
+              )}
 
               </div>
               <div className={wizardStep === 3 ? 'space-y-4' : 'hidden'}>
@@ -1346,16 +1485,12 @@ export default function Calculator() {
                     ? "bg-slate-50/40 border-slate-200/60 opacity-35 pointer-events-none cursor-not-allowed filter blur-[0.2px] select-none"
                     : "bg-slate-50/90 border-slate-200 opacity-100"
                 )}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-slate-300 text-slate-700 text-[10px] font-black flex items-center justify-center">
-                        7
-                      </span>
-                      <h4 className="text-xs font-black uppercase text-slate-900 tracking-wider">
-                        Additional Rider Coverage (Optional)
-                      </h4>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-base font-bold text-brand-text">Extra cover</h3>
+                      <p className="mt-0.5 text-xs text-slate-500">Want extra protection?</p>
                     </div>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">Optional - Can Skip</span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase flex-shrink-0 pt-1">Optional - Can Skip</span>
                   </div>
 
                   <div className="grid grid-cols-1 gap-2 pt-1">
@@ -1472,7 +1607,7 @@ export default function Calculator() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
-                  className="lg:col-span-6 2xl:col-span-5 bg-slate-50/90 rounded-2xl p-4 sm:p-5 border border-slate-200 space-y-3.5"
+                  className="lg:col-start-2 bg-slate-50/90 rounded-2xl p-4 sm:p-5 border border-slate-200 space-y-3.5"
                 >
                   <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
                     <div className="flex items-center gap-2.5">
@@ -1711,41 +1846,44 @@ export default function Calculator() {
             </div>
           )}
 
-          {/* Bottom Action Bar */}
-          <div className="border-t border-slate-200 pt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-            
-            {/* Left Metric Display */}
-            <div className="flex items-baseline gap-2">
-              <span className="text-xs font-black uppercase text-slate-600 tracking-wider">
-                Total Premium ({input.paymentMethod ? input.paymentMethod.toUpperCase() : '---'}):
-              </span>
-              <span className="text-2xl sm:text-3xl font-black font-mono text-cyan-600 tracking-tight">
-                {formatCurrency(totalPayableAmount)}
-              </span>
-            </div>
+          {/* Bottom Action Bar — live premium + action */}
+          <div className="border-t border-slate-200 pt-4">
+            <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+              {/* Live premium — updates with every change */}
+              <div className="flex items-end gap-6 flex-1 min-w-0">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Your premium</div>
+                  {displayPremium > 0 && effectivePaymentMethod ? (
+                    <div className="text-2xl font-black font-mono text-slate-900 tracking-tight leading-tight">
+                      {formatCurrency(displayPremium)} <small className="text-sm font-bold text-slate-500">{premiumPeriodLabel}</small>
+                    </div>
+                  ) : (
+                    <div className="text-sm font-bold text-slate-400 py-1">
+                      {!selectedProductId ? 'Choose a plan to see it' : 'Complete the steps above to see your premium'}
+                    </div>
+                  )}
+                </div>
+                {effectivePaymentMethod !== 'Single' && totalOverTerm > 0 && input.term > 0 && (
+                  <div className="text-xs text-slate-500 pb-0.5">
+                    Total over {input.term} yrs<br />
+                    <b className="text-sm font-mono font-black text-slate-900">{formatCurrency(totalOverTerm)}</b>
+                  </div>
+                )}
+              </div>
 
-            {/* Right Action Buttons */}
-            <div className="flex items-center gap-3 justify-end">
-              <button 
+              {/* Action button — step 2 goes straight to results unless the combo P2 is still open */}
+              <button
                 type="button"
-                onClick={handleReset}
-                className="rounded-full px-5 py-2.5 bg-slate-900 text-white font-bold text-xs uppercase tracking-wider hover:bg-slate-800 cursor-pointer transition-all shadow-md flex items-center gap-1.5"
-              >
-                <X className="w-3.5 h-3.5" />
-                Reset
-              </button>
-
-              <button 
-                onClick={() => { if (wizardStep < 3) setWizardStep((wizardStep+1) as 1|2|3); else { setPreviewSection('quotation'); setAppState('results'); } }}
-                disabled={(wizardStep === 1 && !isStep1Complete) || (wizardStep === 2 && !isStep6Complete) || (wizardStep === 3 && (!isStep6Complete || !isComboFullyComplete || Object.keys(validationErrors).length > 0))}
+                onClick={handleActionClick}
+                disabled={actionDisabled}
                 className={cn(
-                  "rounded-full px-7 py-3 font-black text-xs sm:text-sm uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-lg",
-                  ((wizardStep === 1 && !isStep1Complete) || (wizardStep === 2 && !isStep6Complete) || (wizardStep === 3 && (!isStep6Complete || !isComboFullyComplete || Object.keys(validationErrors).length > 0)))
+                  "rounded-full px-7 py-3 font-black text-xs sm:text-sm uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg w-full lg:w-auto",
+                  actionDisabled
                     ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
                     : "bg-brand-primary text-white hover:bg-brand-primary/90 shadow-brand-primary/25 active:scale-95"
                 )}
               >
-                {wizardStep < 3 ? 'Next' : 'View Calculation Result'}
+                {actionLabel}
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -3264,30 +3402,14 @@ export default function Calculator() {
                     className="w-full"
                   >
                     <div className="flex items-center justify-between mb-5"><button onClick={() => {setAppState('inputs');setWizardStep(3);}} className="flex items-center gap-2 rounded-xl border border-[#e5e8df] bg-white px-3 py-2 text-sm"><ArrowLeft className="w-4 h-4"/> Back</button><h2 className="text-lg font-bold text-brand-text">Quotation Preview</h2><span className="w-14"/></div>
-                    <div className="grid grid-cols-4 gap-2 mb-5 rounded-2xl border border-[#e5e8df] bg-white p-2">
-                      {([{id:'quotation',label:'Quotation',Icon:FileText},{id:'term',label:'Term Comparison',Icon:BarChart3},{id:'policy',label:'Policy Comparison',Icon:ArrowLeftRight},{id:'liquidity',label:'Liquidity',Icon:Activity}] as const).map(({id,label,Icon})=><button key={id} type="button" onClick={()=>{setPreviewSection(id);setLiquidityDetails(false);}} className={cn('min-h-16 flex flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] sm:text-xs font-semibold',previewSection===id?'bg-brand-primary text-white':'bg-[#f7f8ef] text-brand-text')}><Icon className="w-5 h-5"/><span className="text-center leading-tight">{label}</span></button>)}
-                    </div>
+                    <ResultsTabBar section={previewSection} onSelect={(id) => { setPreviewSection(id); setLiquidityDetails(false); }} />
                     {previewSection === 'quotation' ? (<>
-
-                      {selectedProduct && !isComboEnabled && (() => {
-                        const installments = input.paymentMethod === 'Single' ? 1 : input.paymentMethod === 'Yearly' ? input.term : input.paymentMethod === 'Half-yearly' ? input.term * 2 : input.paymentMethod === 'Quarterly' ? input.term * 4 : input.term * 12;
-                        const youPay = isSDPP ? (sdppData?.totalPremiumPaid || 0) : (selectedProduct.totalPremium?.[input.paymentMethod] || 0) * installments;
-                        const youGet = isSDPP ? null : (selectedProduct.maturityValue || input.sumAssured);
-                        const deathCover = isSDPP ? null : (selectedProductId === 'sspe' ? (selectedProduct.maturityValue || input.sumAssured) : input.sumAssured);
-                        return (
-                          <div className="rounded-2xl border border-[#e5e8df] bg-white p-5 mb-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
-                              <div><div className="text-[10px] font-black uppercase tracking-widest text-slate-400">You Pay (Total)</div><div className="text-xl font-black font-mono text-brand-text">{formatCurrency(youPay)}</div><div className="text-[10px] text-slate-400">{input.paymentMethod} x {installments} over {input.term} years</div></div>
-                              <div><div className="text-[10px] font-black uppercase tracking-widest text-slate-400">You Receive at Maturity</div><div className="text-xl font-black font-mono text-brand-primary">{isSDPP ? `${formatCurrency(sdppData?.maturity7 || 0)} - ${formatCurrency(sdppData?.maturity9 || 0)}` : formatCurrency(youGet || 0)}</div><div className="text-[10px] text-slate-400">{isSDPP ? 'Projected at 7% - 9% crediting rates - NOT guaranteed' : selectedProductId.startsWith('s3pp') || selectedProductId.startsWith('s4pp') ? 'Total of all stage payments incl. final payment' : 'As per policy table'}</div></div>
-                              <div><div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Death Cover</div><div className="text-xl font-black font-mono text-brand-text">{isSDPP ? (typeof sdppData?.deathBenefit === 'number' ? formatCurrency(sdppData.deathBenefit) : 'Account Value based') : formatCurrency(deathCover || 0)}</div><div className="text-[10px] text-slate-400">{selectedProductId === 'sspe' ? 'Equals the maturity benefit' : 'Payable to your nominee'}</div></div>
-                            </div>
-                          </div>
-                        );
-                      })()}
 
                       <PlanQuotationModal
                         embedded
-                        showProjection={false}
+                        showProjection
+                        projectionPreview
+                        onAddRider={() => { setWizardStep(3); setAppState('inputs'); }}
                         onViewDiseases={setCiInfoView}
                         onViewPremiumBreakdown={() => setPremiumBreakdownOpen(true)}
                         onViewModeComparison={() => setModeComparisonOpen(true)}
@@ -3323,6 +3445,7 @@ export default function Calculator() {
         onViewDiseases={setCiInfoView}
         onViewPremiumBreakdown={() => setPremiumBreakdownOpen(true)}
         onViewModeComparison={() => setModeComparisonOpen(true)}
+        onAddRider={() => { setShowQuotationModal(false); setWizardStep(3); setAppState('inputs'); }}
         isOpen={showQuotationModal}
         onClose={() => setShowQuotationModal(false)}
         input={input}

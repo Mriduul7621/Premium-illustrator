@@ -18,7 +18,7 @@ test('CI Classic: appendix lists exactly the 19 shared covered diseases with the
   assert.deepEqual(schedule.groups[0].entries.map(entry => entry.bengali), CLASSIC_CI_DISEASES.map(disease => disease.bengali));
   assert.deepEqual(schedule.groups[0].entries.map(entry => entry.index), CLASSIC_CI_DISEASES.map((_, index) => index + 1));
   assert.equal(schedule.coverage, 720000);
-  assert.match(schedule.groups[0].benefit, /CI coverage: BDT 720,000/);
+  assert.match(schedule.groups[0].benefit, /CI coverage: BDT 7,20,000/);
   assert.equal(schedule.coverageNote, undefined);
 });
 
@@ -31,8 +31,8 @@ test('CI Standard: one appendix with separate minor and major sections and the b
   assert.equal(schedule.groups[1].entries.length, MAJOR_CI_DISEASES.length);
   assert.match(schedule.groups[0].heading, /Minor critical illness \(10\)/);
   assert.match(schedule.groups[1].heading, /Major critical illness \(15\)/);
-  assert.match(schedule.groups[0].benefit, /30% of CI coverage: BDT 216,000/);
-  assert.match(schedule.groups[1].benefit, /If minor claimed: 70% - BDT 504,000\. If minor not claimed: 100% - BDT 720,000\./);
+  assert.match(schedule.groups[0].benefit, /30% of CI coverage: BDT 2,16,000/);
+  assert.match(schedule.groups[1].benefit, /If minor claimed: 70% - BDT 5,04,000\. If minor not claimed: 100% - BDT 7,20,000\./);
   assert.deepEqual(schedule.groups.flatMap(group => group.entries.map(entry => entry.english)),
     [...MINOR_CI_DISEASES, ...MAJOR_CI_DISEASES].map(disease => disease.english));
 });
@@ -48,7 +48,7 @@ test('below the rider minimum sum assured the appendix states that no cover appl
   const options = quotationFixture('endowment');
   const schedule = buildQuotationModel({ ...options, input: { ...options.input, hasCIClassic: true, sumAssured: 150000 } }).ciSchedule!;
   assert.equal(schedule.coverage, undefined);
-  assert.match(schedule.coverageNote!, /BDT 200,000/);
+  assert.match(schedule.coverageNote!, /BDT 2,00,000/);
   assert.match(schedule.groups[0].benefit, /No coverage amount applies/);
   assert.equal(schedule.groups[0].entries.length, 19);
 });

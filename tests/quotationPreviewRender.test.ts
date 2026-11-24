@@ -29,32 +29,54 @@ const renderCompare = (options: any, isOpen: boolean): string =>
 const renderCiDialog = (options: any, view: 'classic' | 'standard' | null): string =>
   renderToString(React.createElement(CriticalIllnessDialog, { view, onClose: () => {}, input: options.input, onDownload: () => {} })).replace(/<!-- -->/g, '');
 
-test('standard preview: summary and core benefits in order, with engine figures', () => {
+test('standard preview: hero and three-part benefits in order, with engine figures', () => {
   const options = quotationFixture('endowment', 'Monthly', 15);
   const html = renderPreview(options);
   const product = options.selectedProduct!;
-  const summaryAt = html.indexOf('1. Your Plan at a Glance');
-  const benefitsAt = html.indexOf('2. Core Benefits');
-  assert.ok(summaryAt > -1 && benefitsAt > summaryAt, 'sections appear in the order 1 summary, 2 benefits');
+  const heroAt = html.indexOf('You pay');
+  const benefitsAt = html.indexOf('1. Survival Benefits');
+  assert.ok(heroAt > -1 && benefitsAt > heroAt, 'sections appear in the order hero, benefits');
   assert.ok(html.includes(formatCurrency(product.totalPremium.Monthly)));
   assert.ok(html.includes(formatCurrency(product.totalPremium.Monthly * 180)));
   assert.ok(html.includes(formatCurrency(1440000)));
-  assert.ok(html.includes('If you stay alive'));
-  assert.ok(html.includes('If the policyholder dies'));
+  assert.ok(html.includes('/ month'), 'hero premium carries the period suffix');
+  assert.ok(html.includes('Total payable over 15 yrs'));
+  assert.ok(html.includes('You are covered for'));
+  assert.ok(html.includes('Sum Assured — your family’s protection amount'));
+  assert.ok(html.includes('While you are alive &amp; well'));
+  assert.ok(html.includes('For your family, if you pass away.'));
   assert.ok(!html.includes('Your riders'), 'no rider section when no rider is selected');
+  // Benefits use the three-part taxonomy: Survival first, Uncertainties
+  // always visible (with an invite when no rider is selected), Death last.
+  assert.ok(html.includes('1. Survival Benefits'));
+  assert.ok(html.includes('2. Uncertainties Coverage'), 'uncertainties panel stays visible without riders');
+  assert.ok(html.includes('No illness or accident cover added yet.'));
+  assert.ok(html.includes('+ Add a rider to this plan →'), 'empty uncertainties state invites adding a rider');
+  assert.ok(html.includes('3. Death Coverage'));
+  // Tax rebate and hospital perk come with every policy.
+  assert.ok(html.includes('Tax rebate (10% of yearly premium)'));
+  assert.ok(html.includes(formatCurrency(8718)), 'rebate is 10% of the 87,178 yearly premium');
+  assert.ok(html.includes('Income Tax Act 2023 (Finance Act 2026)'));
+  assert.ok(html.includes('Lab test discount at partner hospitals'));
+  assert.ok(html.includes('Up to 40%'));
+  assert.ok(html.includes('View hospital list'));
   assert.ok(!html.includes('Premium Commitment &amp; Deposit Summary'), 'old premium table is replaced');
   assert.ok(!html.includes('Premium by Payment Frequency'), 'old frequency cards are replaced');
-  // Print / Download live at the very end now, after all content.
+  // Edit / Share / Download live at the very end now, after all content.
   const disclaimerAt = html.indexOf('Important Disclaimer');
   const footerAt = html.indexOf('Generated via T&amp;D Team');
   const downloadAt = html.indexOf('Download PDF');
   assert.ok(downloadAt > -1, 'PDF download button is kept');
   assert.ok(downloadAt > disclaimerAt && downloadAt > footerAt, 'Download PDF sits after the disclaimer and footer notice');
-  assert.ok(html.indexOf('PDF download includes') > disclaimerAt, 'the download note moved to the end too');
-  assert.ok(html.includes('Print'), 'Print button is kept');
-  // Aligned app-style layout: slim heading, no document furniture.
-  assert.ok(html.includes(product.productName), 'slim heading shows the product name');
-  assert.ok(html.includes('15 Years'), 'slim heading shows the policy term');
+  assert.ok(html.lastIndexOf('Edit inputs') > disclaimerAt, 'Edit inputs sits at the end too');
+  assert.ok(html.indexOf('Share') > disclaimerAt, 'Share sits at the end too');
+  assert.ok(!html.includes('Print quotation'), 'the Print button is removed — the PDF is the print path');
+  assert.ok(!html.includes('PDF download includes'), 'the static download note is removed');
+  // Heading: "Your illustration" + product · term · mode meta line.
+  assert.ok(html.includes('Your illustration'));
+  assert.ok(html.includes(product.productName), 'meta line shows the product name');
+  assert.ok(html.includes('15 yrs'), 'meta line shows the policy term');
+  assert.ok(html.includes('Monthly'), 'meta line shows the payment mode');
   assert.ok(!html.includes('Proposal Quotation Statement'), 'dark document banner is gone');
   assert.ok(!html.includes('Client Profile Details'), 'client grid lives in the PDF only');
   assert.ok(!html.includes('Policy Parameters'), 'policy grid lives in the PDF only');
@@ -62,10 +84,11 @@ test('standard preview: summary and core benefits in order, with engine figures'
   assert.ok(!html.includes('shanta-life-logo.png'), 'no logo block in the preview');
   // Full-width content: the narrow 800px column is gone, benefit panels pair up.
   assert.ok(!html.includes('max-w-[800px]'), 'standard content is no longer capped at 800px');
-  assert.ok(html.includes('md:grid-cols-2'), 'survival and death panels sit side by side on wider screens');
+  assert.ok(html.includes('md:grid-cols-2'), 'benefit panels pair up on wider screens');
+  assert.ok(html.includes('xl:grid-cols-3'), 'all three benefit panels sit side by side at desktop width');
   assert.ok(html.includes('lg:grid-cols-2'), 'good-to-know and disclaimer sit side by side on wider screens');
-  // The unofficial marking stays, as one subtle muted line — not the big badge.
-  assert.ok(html.includes('Unofficial sample illustration'), 'unofficial note is kept');
+  // The unofficial marking stays, in the board's wording.
+  assert.ok(html.includes('Unofficial — created by the Training &amp; Development Team'), 'unofficial note is kept');
   assert.ok(!html.includes('UNOFFICIAL SAMPLE ILLUSTRATION'), 'big unofficial badge is gone from the standard preview');
   // Premium breakdown and mode comparison are behind buttons now, like View Diseases.
   assert.ok(html.includes('Breakdown'), 'Breakdown button is present in the premium tile');
@@ -74,24 +97,77 @@ test('standard preview: summary and core benefits in order, with engine figures'
   assert.ok(!html.includes('Compare Payment Modes'), 'mode comparison table is hidden by default');
 });
 
-test('standard preview: S3PP stage payouts show policy year, calendar year and amount', () => {
+test('standard preview: S3PP stage payouts as a timeline — dates and amounts, one line each', () => {
   const options = quotationFixture('s3pp', 'Yearly', 15);
   const html = renderPreview(options);
-  assert.ok(html.includes('Stage 1 (25%)'));
-  assert.ok(html.includes('Year 5'));
-  assert.ok(html.includes('Year 10'));
-  assert.ok(html.includes('At maturity (50%)'));
-  assert.ok(html.includes(formatCurrency(360000)));
-  assert.ok(html.includes(formatCurrency(720000)));
-  assert.ok(html.includes('Total you will receive'));
-  assert.ok(html.includes('not additional to it'));
+  // Compact stage line: years and amounts joined, as on the board.
+  assert.ok(html.includes('Stage payouts'));
+  assert.ok(html.includes('2031 · 2036 · 2041'), 'stage calendar years join with middots');
+  assert.ok(html.includes(`${formatCurrency(360000)} + ${formatCurrency(360000)}<br/>+ ${formatCurrency(720000)}`), 'stage amounts break before the last amount, as on the board');
+  assert.ok(html.includes('Total you receive'));
+  assert.ok(html.includes('paid back in stages, by 2041'));
+  assert.ok(html.includes('stages add up to the full cover'));
+  // Mobile timeline (Detail phone): always shown, no toggle. The toggle is
+  // gone; the last occurrence of each label is the mobile timeline row,
+  // since the mobile block is last in the DOM.
+  assert.ok(!html.includes('See stage dates →'), 'the timeline toggle is gone — the mobile timeline is always shown');
+  assert.ok(!html.includes('Hide stage dates'), 'no hide toggle either');
+  assert.ok(html.includes('First stage payout'));
+  assert.ok(html.includes('Second stage payout'));
+  assert.ok(html.includes('Final maturity'));
+  assert.ok(html.includes('Year 5 · 2031'));
+  assert.ok(html.includes('Year 10 · 2036'));
+  assert.ok(html.includes('Year 15 · 2041'));
+  // Mobile timeline order: year label above the payout name, one row per
+  // stage, each amount with its row, Total below the last stage.
+  assert.ok(html.lastIndexOf('Year 5 · 2031') < html.lastIndexOf('First stage payout'), 'year label sits above the payout name');
+  assert.ok(html.lastIndexOf('First stage payout') < html.lastIndexOf('Year 10 · 2036'), 'stages render in order');
+  assert.ok(html.lastIndexOf('Year 10 · 2036') < html.lastIndexOf('Second stage payout'));
+  assert.ok(html.lastIndexOf('Second stage payout') < html.lastIndexOf('Year 15 · 2041'));
+  assert.ok(html.lastIndexOf('Year 15 · 2041') < html.lastIndexOf('Final maturity'));
+  assert.ok(html.lastIndexOf('Second stage payout') < html.lastIndexOf(formatCurrency(360000)), 'second amount sits with the second row');
+  assert.ok(html.lastIndexOf('Final maturity') < html.lastIndexOf(formatCurrency(720000)), 'final amount sits with the final row');
+  assert.ok(html.lastIndexOf('Final maturity') < html.lastIndexOf('stages add up to the full cover'), 'Total you receive sits below the timeline');
+  assert.ok(html.includes('border-dashed'), 'the Total row is divided by a dashed rule, as on the Detail phone');
+  // Desktop horizontal strip above the benefit parts.
+  assert.ok(html.includes('Your money back while alive — stage payouts'));
+  // The old stage table is gone.
+  assert.ok(!html.includes('Stage 1 (25%)'), 'old stage table is replaced by the timeline');
+  assert.ok(!html.includes('At maturity (50%)'));
+  assert.ok(!html.includes('not additional to it'));
+});
+
+test('standard preview: S4PP stage payouts render all four stages in the same mobile timeline', () => {
+  const options = quotationFixture('s4pp', 'Yearly', 20);
+  const html = renderPreview(options);
+  // Four stages from standardStages: 15% at years 5, 10, 15, 55% at maturity.
+  assert.ok(html.includes('First stage payout'));
+  assert.ok(html.includes('Second stage payout'));
+  assert.ok(html.includes('Third stage payout'));
+  assert.ok(html.includes('Final maturity'));
+  assert.ok(html.includes('Year 5 · 2031'));
+  assert.ok(html.includes('Year 10 · 2036'));
+  assert.ok(html.includes('Year 15 · 2041'));
+  assert.ok(html.includes('Year 20 · 2046'));
+  assert.ok(html.includes('Stage payouts'), 'desktop keeps the compressed one-line summary');
+  assert.ok(!html.includes('See stage dates →'), 'no toggle on mobile');
+  // Mobile timeline order: the four rows in sequence, Total below.
+  assert.ok(html.lastIndexOf('Year 5 · 2031') < html.lastIndexOf('First stage payout'));
+  assert.ok(html.lastIndexOf('First stage payout') < html.lastIndexOf('Year 10 · 2036'));
+  assert.ok(html.lastIndexOf('Second stage payout') < html.lastIndexOf('Year 15 · 2041'));
+  assert.ok(html.lastIndexOf('Third stage payout') < html.lastIndexOf('Year 20 · 2046'));
+  assert.ok(html.lastIndexOf('Year 20 · 2046') < html.lastIndexOf('Final maturity'));
+  assert.ok(html.lastIndexOf('Final maturity') < html.lastIndexOf(formatCurrency(792000)), 'final amount (55% of SA) sits with the final row');
+  assert.ok(html.lastIndexOf('Final maturity') < html.lastIndexOf('stages add up to the full cover'), 'Total you receive sits below the timeline');
+  // Desktop horizontal strip above the benefit parts.
+  assert.ok(html.includes('Your money back while alive — stage payouts'));
 });
 
 test('standard preview: Child Education stipend is highlighted and the death story shows all three parts', () => {
-  const options = quotationFixture('scep_2', 'Monthly', 15);
+  const options = quotationFixture('scep_3', 'Monthly', 15);
   const html = renderPreview(options);
   assert.ok(html.includes('Monthly education stipend'));
-  assert.ok(html.includes(formatCurrency(28800)));
+  assert.ok(html.includes(formatCurrency(43200)));
   assert.ok(html.includes('border-[#F37021]'), 'stipend panel carries the orange highlight');
   assert.ok(html.includes('full sum assured again'));
   assert.ok(html.includes('Future premiums are waived'));
@@ -99,44 +175,95 @@ test('standard preview: Child Education stipend is highlighted and the death sto
   assert.ok(html.includes(options.selectedProduct!.productName), 'slim heading shows the child plan name');
 });
 
-test('standard preview: selected riders show their benefits with amounts', () => {
+test('standard preview: selected riders sort into Uncertainties and Death parts', () => {
   const options = ciQuotationFixture('classic');
   options.input.hasAccidentalProtection = true;
   options.selectedProduct = calculatePremiums(options.input).find(result => result.productId === 'endowment')!;
   const html = renderPreview(options);
-  assert.ok(html.includes('Your riders'));
-  assert.ok(html.includes(formatCurrency(2880000)), 'accidental death cover total');
-  assert.ok(html.includes(formatCurrency(216000)), 'accidental medical reimbursement');
+  assert.ok(!html.includes('Your riders'), 'the old combined rider panel is gone');
+  const uncAt = html.indexOf('2. Uncertainties Coverage');
+  const deathAt = html.indexOf('3. Death Coverage');
+  assert.ok(uncAt > -1 && deathAt > uncAt, 'Uncertainties comes before Death');
+  // Critical illness lives in Uncertainties.
   assert.ok(html.includes('Critical Illness — Classic rider'));
+  const ciAt = html.indexOf('Critical Illness — Classic rider');
+  assert.ok(ciAt > uncAt && ciAt < deathAt, 'CI rider sits in Uncertainties');
   assert.ok(html.includes(formatCurrency(720000)), 'CI coverage is 50% of SA');
   assert.ok(html.includes('full coverage amount'));
+  // Accidental disability + medical live in Uncertainties; accidental death in Death.
+  const amrAt = html.indexOf(formatCurrency(216000));
+  assert.ok(amrAt > uncAt && amrAt < deathAt, 'accidental medical reimbursement sits in Uncertainties');
+  const adbAt = html.indexOf(formatCurrency(2880000));
+  assert.ok(adbAt > deathAt, 'accidental death cover total sits in Death');
   assert.ok(html.includes('Accidental Protection rider'));
+});
+
+test('standard preview: single-premium SSPE rebate is capped at 10% of the sum assured', () => {
+  const html = renderPreview(quotationFixture('sspe', 'Single', 10));
+  assert.ok(html.includes(formatCurrency(14400)), 'SSPE rebate is 10% of the 1,44,000 eligible premium (10% of SA cap)');
+  assert.ok(html.includes('https://shantalife.com/support#hospitals'), 'hospital list link is present');
 });
 
 test('standard preview: single-premium plans show no Compare button, and SSPE death cover is the maturity benefit', () => {
   const options = quotationFixture('sspe', 'Single', 10);
   const html = renderPreview(options);
   const product = options.selectedProduct!;
-  assert.ok(html.includes('1. Your Plan at a Glance'));
+  assert.ok(html.includes('You pay'));
+  assert.ok(html.includes('You are covered for'));
   assert.ok(!html.includes('Compare Payment Modes'), 'one mode only, so there is nothing to compare');
   assert.ok(!html.includes('Compare →'), 'no Compare button when there is only one mode');
   assert.ok(html.includes('Breakdown'), 'the Breakdown button still shows for single-premium plans');
-  assert.ok(html.includes('2. Core Benefits'), 'section numbers run in order');
+  assert.ok(!html.includes('What you get'), 'no What-you-get header — the benefit parts follow the hero directly');
+  assert.ok(html.includes('1. Survival Benefits'), 'benefits still open with Survival');
   assert.ok(html.includes(formatCurrency(product.totalPremium.Single)));
   assert.ok(html.includes(formatCurrency(product.maturityValue!)));
+  // Single-premium plans have no rider step, so the empty Uncertainties
+  // state says so instead of offering a rider.
+  assert.ok(html.includes('2. Uncertainties Coverage'));
+  assert.ok(html.includes('Riders are not available on single-payment plans'));
+  assert.ok(!html.includes('+ Add a rider to this plan'), 'no add-rider invite where no rider step exists');
 });
 
-test('standard preview: projection is a flowing section with no page-2 paper concept', () => {
+test('standard preview: projection is a flowing section with the Liquidity columns', () => {
   const options = quotationFixture('endowment', 'Monthly', 15);
   const html = renderPreview(options, { showProjection: true });
-  const benefitsAt = html.indexOf('2. Core Benefits');
-  const projectionAt = html.indexOf('3. Policy Value Projection Trajectory');
-  assert.ok(benefitsAt > -1 && projectionAt > benefitsAt, 'projection follows the benefits section as section 3');
-  assert.ok(html.includes('END OF YEAR'), 'projection table renders');
+  const benefitsAt = html.indexOf('1. Survival Benefits');
+  const projectionAt = html.indexOf('Policy Value Projection Trajectory');
+  assert.ok(benefitsAt > -1 && projectionAt > benefitsAt, 'projection follows the benefits section');
+  // Same 8 columns as the Liquidity tab, title case.
+  for (const header of ['End of Year', 'Premium Paid', 'Natural Death', 'Surrender Value', 'Paid-Up Value', 'ETI Cover', 'ETI Cash Back', 'Loan (Max)']) {
+    assert.ok(html.includes(header), `projection table has the ${header} column`);
+  }
+  assert.ok(!html.includes('ETI BENEFITS'), 'leftover ETI BENEFITS header is gone');
+  assert.ok(!html.includes('BASE PREMIUM'), 'BASE PREMIUM is renamed Premium Paid');
+  assert.ok(!html.includes('Active Death Coverage'), 'the redundant ETI duration display is gone');
+  // Full table: header row + one row per year (15).
+  assert.equal((html.match(/<tr/g) || []).length, 16, 'full projection table renders all 15 years');
   assert.ok(html.includes('Good to know before you decide'));
   assert.ok(html.includes('Important Disclaimer &amp; Notes'));
   assert.ok(!html.includes('Page 2 of 2'), 'no page-2 concept');
   assert.ok(!html.includes('shanta-life-logo.png'), 'no logo block above the projection');
+});
+
+test('standard preview: quotation tab shows a cropped projection preview, full table in Liquidity', () => {
+  const options = quotationFixture('endowment', 'Monthly', 15);
+  const html = renderPreview(options, { showProjection: true, projectionPreview: true });
+  assert.ok(html.includes('Policy Value Projection Trajectory'));
+  assert.ok(html.includes('Cropped preview — full 15-year table in the Liquidity tab'));
+  // Preview: header row + years 1, 5, 10, 15 only.
+  assert.equal((html.match(/<tr/g) || []).length, 5, 'cropped preview renders 4 year rows');
+});
+
+test('standard preview: Edit inputs, Share and Download PDF are the bottom-bar buttons', () => {
+  const options = quotationFixture('endowment', 'Monthly', 15);
+  const html = renderPreview(options);
+  const editAt = html.indexOf('Edit inputs');
+  const shareAt = html.indexOf('Share');
+  const downloadAt = html.indexOf('Download PDF');
+  assert.ok(editAt > -1 && shareAt > editAt && downloadAt > shareAt, 'bottom bar reads Edit inputs, Share, Download PDF in order');
+  assert.ok(html.includes('aria-label="Edit inputs"'));
+  assert.ok(html.includes('aria-label="Share illustration"'));
+  assert.ok(!html.includes('Print quotation'), 'no Print button');
 });
 
 test('SDPP and combo previews keep the existing layout', () => {
@@ -148,12 +275,28 @@ test('SDPP and combo previews keep the existing layout', () => {
   assert.ok(sdppHtml.includes('Client Profile Details'), 'SDPP keeps the client grid');
   assert.ok(sdppHtml.includes('Download PDF'), 'SDPP keeps the download button');
   assert.ok(sdppHtml.indexOf('Download PDF') > sdppHtml.indexOf('Premium Commitment &amp; Deposit Summary'), 'buttons sit at the end for SDPP too');
+  assert.ok(sdppHtml.includes('Edit inputs'), 'SDPP keeps the Edit inputs button');
+  assert.ok(sdppHtml.includes('Share'), 'SDPP keeps the Share button');
+  // SDPP uses the same three-part benefit taxonomy in its paper layout.
+  assert.ok(sdppHtml.includes('1. Survival Benefits'));
+  assert.ok(sdppHtml.includes('2. Uncertainties Coverage'));
+  assert.ok(sdppHtml.includes('3. Death Coverage'));
+  assert.ok(sdppHtml.includes('View hospital list'), 'SDPP shows the hospital perk too');
+  assert.ok(sdppHtml.includes('Tax rebate (10% of yearly deposit)'), 'SDPP shows the rebate on the yearly deposit');
+  assert.ok(sdppHtml.includes(`Up to ${formatCurrency(12000)} / yr`), 'SDPP rebate is 10% of the 1,20,000 yearly deposit');
   const comboHtml = renderPreview(comboFixture());
   assert.ok(comboHtml.includes('COMBINED PREMIUM / DEPOSIT'));
   assert.ok(!comboHtml.includes('Your Plan at a Glance'));
   assert.ok(comboHtml.includes('Proposal Quotation Statement'), 'combo keeps the document banner');
   assert.ok(comboHtml.includes('Download PDF'), 'combo keeps the download button');
   assert.ok(comboHtml.indexOf('Download PDF') > comboHtml.indexOf('COMBINED PREMIUM / DEPOSIT'), 'buttons sit at the end for combo too');
+  assert.ok(comboHtml.includes('Edit inputs'), 'combo keeps the Edit inputs button');
+  assert.ok(comboHtml.includes('Share'), 'combo keeps the Share button');
+  assert.ok(comboHtml.includes('PARTNER HOSPITAL LAB TEST DISCOUNT'), 'combo shows the hospital perk too');
+  assert.ok(comboHtml.includes('Income Tax Act 2023 (Finance Act 2026)'), 'combo rebate cites the law');
+  assert.ok(comboHtml.includes(`Primary Rebate (${formatCurrency(11569)})`), 'combo primary rebate is 10% of the 1,15,690 yearly premium');
+  assert.ok(comboHtml.includes(`SDPP Rebate (${formatCurrency(12000)})`), 'combo SDPP rebate is 10% of the 1,20,000 yearly deposit');
+  assert.ok(comboHtml.includes(`Up to ${formatCurrency(23569)}`), 'combo total rebate adds both parts');
 });
 
 test('premium breakdown and compare buttons only render when the parent provides the callbacks', () => {
