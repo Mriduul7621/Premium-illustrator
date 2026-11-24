@@ -67,7 +67,6 @@ export default function PlanQuotationModal({
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<'idle' | 'shared' | 'copied'>('idle');
-  const [stageTimelineOpen, setStageTimelineOpen] = useState(false);
   const exportInProgress = useRef(false);
   const [documentZoom, setDocumentZoom] = useState(1);
   const documentAreaRef = useRef<HTMLDivElement>(null);
@@ -1517,48 +1516,54 @@ export default function PlanQuotationModal({
                     <p className="text-[11px] text-slate-500">While you are alive &amp; well — money back to you.</p>
                     {standardStages.length > 0 ? (
                       <div className="space-y-3">
-                        <div className="flex justify-between items-start gap-2">
-                          <div>
-                            <div className="text-xs font-bold text-brand-text">Total you receive</div>
-                            <div className="text-[11px] text-slate-500">paid back in stages, by {issueYear + input.term}</div>
-                          </div>
-                          <div className="font-mono font-black text-base text-brand-primary text-right">{formatCurrency(input.sumAssured)}</div>
-                        </div>
-                        <div className="flex justify-between items-start gap-2 pt-2 border-t border-[#e5e8df]">
-                          <div>
-                            <div className="text-xs font-bold text-brand-text">Stage payouts</div>
-                            <div className="text-[11px] text-slate-500 whitespace-nowrap">{standardStages.map(s => s.calendarYear).join(' · ')}</div>
-                          </div>
-                          <div className="font-bold text-sm text-brand-text text-right">{standardStages.slice(0, -1).map(s => formatCurrency(s.amount)).join(' + ')}<br />+ {formatCurrency(standardStages[standardStages.length - 1].amount)}</div>
-                        </div>
-                        {/* Stage dates — expandable timeline on mobile; the
-                            desktop strip above the columns shows the same.
-                            Always rendered so the dates stay in the DOM. */}
-                        <div className="lg:hidden pt-2 border-t border-[#e5e8df]">
-                          <button
-                            type="button"
-                            onClick={() => setStageTimelineOpen(v => !v)}
-                            aria-expanded={stageTimelineOpen}
-                            className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 cursor-pointer"
-                          >
-                            {stageTimelineOpen ? 'Hide stage dates' : 'See stage dates →'}
-                          </button>
-                          <div className={stageTimelineOpen ? 'mt-2 space-y-2' : 'hidden'}>
-                            {standardStages.map((stage, i) => (
-                              <div key={stage.label} className="flex items-center gap-2 text-xs">
-                                <span className="w-2 h-2 rounded-full bg-brand-primary flex-shrink-0" />
-                                <span className="font-bold text-brand-text">{stageTimelineLabel(i, i === standardStages.length - 1)}</span>
-                                <span className="text-slate-500">Year {stage.policyYear} · {stage.calendarYear}</span>
-                                <span className="ml-auto font-mono font-bold text-brand-text">{formatCurrency(stage.amount)}</span>
-                              </div>
-                            ))}
-                            <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#e5e8df]">
-                              <div>
-                                <div className="text-xs font-bold text-brand-text">Total you receive</div>
-                                <div className="text-[11px] text-slate-500">stages add up to the full cover</div>
-                              </div>
-                              <div className="font-mono font-black text-sm text-brand-primary">{formatCurrency(input.sumAssured)}</div>
+                        {/* Desktop (lg+): the compressed form from the laptop
+                            board — Total on top, one-line stage summary. The
+                            horizontal strip above the columns carries the
+                            same dates. Hidden on mobile. */}
+                        <div className="hidden lg:block space-y-3">
+                          <div className="flex justify-between items-start gap-2">
+                            <div>
+                              <div className="text-xs font-bold text-brand-text">Total you receive</div>
+                              <div className="text-[11px] text-slate-500">paid back in stages, by {issueYear + input.term}</div>
                             </div>
+                            <div className="font-mono font-black text-base text-brand-primary text-right">{formatCurrency(input.sumAssured)}</div>
+                          </div>
+                          <div className="flex justify-between items-start gap-2 pt-2 border-t border-[#e5e8df]">
+                            <div>
+                              <div className="text-xs font-bold text-brand-text">Stage payouts</div>
+                              <div className="text-[11px] text-slate-500 whitespace-nowrap">{standardStages.map(s => s.calendarYear).join(' · ')}</div>
+                            </div>
+                            <div className="font-bold text-sm text-brand-text text-right">{standardStages.slice(0, -1).map(s => formatCurrency(s.amount)).join(' + ')}<br />+ {formatCurrency(standardStages[standardStages.length - 1].amount)}</div>
+                          </div>
+                        </div>
+                        {/* Mobile (below lg): the Detail phone's vertical
+                            stage timeline, always shown — circle markers on
+                            a vertical connector, the year above the payout
+                            name, Total below the timeline. */}
+                        <div className="lg:hidden">
+                          {standardStages.map((stage, i) => (
+                            <div key={stage.label} className={`relative flex items-start gap-3 ${i < standardStages.length - 1 ? 'pb-4' : ''}`}>
+                              <div className="flex flex-col items-center self-stretch flex-shrink-0">
+                                <div className="mt-0.5 w-4 h-4 rounded-full border-2 border-brand-primary bg-[#f7f8ef]" aria-hidden="true" />
+                                {i < standardStages.length - 1 && (
+                                  <div className="w-0.5 flex-1 bg-brand-primary/30" aria-hidden="true" />
+                                )}
+                              </div>
+                              <div className="flex flex-1 min-w-0 items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="text-[11px] font-bold uppercase tracking-wide text-brand-primary">Year {stage.policyYear} · {stage.calendarYear}</div>
+                                  <div className="text-sm font-bold text-brand-text">{stageTimelineLabel(i, i === standardStages.length - 1)}</div>
+                                </div>
+                                <div className="font-mono font-black text-sm text-brand-text text-right whitespace-nowrap">{formatCurrency(stage.amount)}</div>
+                              </div>
+                            </div>
+                          ))}
+                          <div className="flex justify-between items-start gap-2 pt-3 mt-4 border-t border-dashed border-[#d8dbc9]">
+                            <div>
+                              <div className="text-xs font-bold text-brand-text">Total you receive</div>
+                              <div className="text-[11px] text-slate-500">stages add up to the full cover</div>
+                            </div>
+                            <div className="font-mono font-black text-base text-brand-primary text-right">{formatCurrency(input.sumAssured)}</div>
                           </div>
                         </div>
                       </div>

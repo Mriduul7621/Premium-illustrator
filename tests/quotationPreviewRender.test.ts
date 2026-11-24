@@ -107,20 +107,60 @@ test('standard preview: S3PP stage payouts as a timeline — dates and amounts, 
   assert.ok(html.includes('Total you receive'));
   assert.ok(html.includes('paid back in stages, by 2041'));
   assert.ok(html.includes('stages add up to the full cover'));
-  // Expandable mobile timeline (in the DOM, collapsed by default).
-  assert.ok(html.includes('See stage dates →'), 'timeline toggle is present');
+  // Mobile timeline (Detail phone): always shown, no toggle. The toggle is
+  // gone; the last occurrence of each label is the mobile timeline row,
+  // since the mobile block is last in the DOM.
+  assert.ok(!html.includes('See stage dates →'), 'the timeline toggle is gone — the mobile timeline is always shown');
+  assert.ok(!html.includes('Hide stage dates'), 'no hide toggle either');
   assert.ok(html.includes('First stage payout'));
   assert.ok(html.includes('Second stage payout'));
   assert.ok(html.includes('Final maturity'));
   assert.ok(html.includes('Year 5 · 2031'));
   assert.ok(html.includes('Year 10 · 2036'));
   assert.ok(html.includes('Year 15 · 2041'));
+  // Mobile timeline order: year label above the payout name, one row per
+  // stage, each amount with its row, Total below the last stage.
+  assert.ok(html.lastIndexOf('Year 5 · 2031') < html.lastIndexOf('First stage payout'), 'year label sits above the payout name');
+  assert.ok(html.lastIndexOf('First stage payout') < html.lastIndexOf('Year 10 · 2036'), 'stages render in order');
+  assert.ok(html.lastIndexOf('Year 10 · 2036') < html.lastIndexOf('Second stage payout'));
+  assert.ok(html.lastIndexOf('Second stage payout') < html.lastIndexOf('Year 15 · 2041'));
+  assert.ok(html.lastIndexOf('Year 15 · 2041') < html.lastIndexOf('Final maturity'));
+  assert.ok(html.lastIndexOf('Second stage payout') < html.lastIndexOf(formatCurrency(360000)), 'second amount sits with the second row');
+  assert.ok(html.lastIndexOf('Final maturity') < html.lastIndexOf(formatCurrency(720000)), 'final amount sits with the final row');
+  assert.ok(html.lastIndexOf('Final maturity') < html.lastIndexOf('stages add up to the full cover'), 'Total you receive sits below the timeline');
+  assert.ok(html.includes('border-dashed'), 'the Total row is divided by a dashed rule, as on the Detail phone');
   // Desktop horizontal strip above the benefit parts.
   assert.ok(html.includes('Your money back while alive — stage payouts'));
   // The old stage table is gone.
   assert.ok(!html.includes('Stage 1 (25%)'), 'old stage table is replaced by the timeline');
   assert.ok(!html.includes('At maturity (50%)'));
   assert.ok(!html.includes('not additional to it'));
+});
+
+test('standard preview: S4PP stage payouts render all four stages in the same mobile timeline', () => {
+  const options = quotationFixture('s4pp', 'Yearly', 20);
+  const html = renderPreview(options);
+  // Four stages from standardStages: 15% at years 5, 10, 15, 55% at maturity.
+  assert.ok(html.includes('First stage payout'));
+  assert.ok(html.includes('Second stage payout'));
+  assert.ok(html.includes('Third stage payout'));
+  assert.ok(html.includes('Final maturity'));
+  assert.ok(html.includes('Year 5 · 2031'));
+  assert.ok(html.includes('Year 10 · 2036'));
+  assert.ok(html.includes('Year 15 · 2041'));
+  assert.ok(html.includes('Year 20 · 2046'));
+  assert.ok(html.includes('Stage payouts'), 'desktop keeps the compressed one-line summary');
+  assert.ok(!html.includes('See stage dates →'), 'no toggle on mobile');
+  // Mobile timeline order: the four rows in sequence, Total below.
+  assert.ok(html.lastIndexOf('Year 5 · 2031') < html.lastIndexOf('First stage payout'));
+  assert.ok(html.lastIndexOf('First stage payout') < html.lastIndexOf('Year 10 · 2036'));
+  assert.ok(html.lastIndexOf('Second stage payout') < html.lastIndexOf('Year 15 · 2041'));
+  assert.ok(html.lastIndexOf('Third stage payout') < html.lastIndexOf('Year 20 · 2046'));
+  assert.ok(html.lastIndexOf('Year 20 · 2046') < html.lastIndexOf('Final maturity'));
+  assert.ok(html.lastIndexOf('Final maturity') < html.lastIndexOf(formatCurrency(792000)), 'final amount (55% of SA) sits with the final row');
+  assert.ok(html.lastIndexOf('Final maturity') < html.lastIndexOf('stages add up to the full cover'), 'Total you receive sits below the timeline');
+  // Desktop horizontal strip above the benefit parts.
+  assert.ok(html.includes('Your money back while alive — stage payouts'));
 });
 
 test('standard preview: Child Education stipend is highlighted and the death story shows all three parts', () => {
