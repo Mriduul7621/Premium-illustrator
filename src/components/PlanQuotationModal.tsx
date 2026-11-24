@@ -212,16 +212,22 @@ export default function PlanQuotationModal({
   // Tk 7,50,000; the rebate actually allowed is the lowest of 3% of total
   // income, 10% of eligible investment and Tk 7,50,000. Life-insurance
   // premium counts as eligible investment up to 10% of the sum assured.
-  // The app does not know the customer's income or other investments, so the
-  // figure shown is this policy's own contribution — an "up to" amount, not
-  // a promise. SDPP deposits are not counted: only life-insurance premium is.
+  // SDPP deposits count too — the rebate base is the year's deposit, at the
+  // same 10% rate and the same Tk 7,50,000 cap (the 10%-of-sum-assured cap
+  // is a life-premium rule and does not apply to deposits). The app does not
+  // know the customer's income or other investments, so the figure shown is
+  // this policy's own contribution — an "up to" amount, not a promise.
   const yearlyPremiumForRebate = input.paymentMethod === 'Single'
     ? (selectedProduct?.totalPremium?.['Single'] || 0)
     : (selectedProduct?.totalPremium?.['Yearly'] || 0);
-  const eligiblePremiumForRebate = isSDPP ? 0 : Math.min(yearlyPremiumForRebate, input.sumAssured * 0.10);
+  const eligiblePremiumForRebate = isSDPP
+    ? basicDepositAnnual
+    : Math.min(yearlyPremiumForRebate, input.sumAssured * 0.10);
   const primaryTaxRebate = Math.min(Math.round(eligiblePremiumForRebate * 0.10), 750000);
-  const sdppTaxRebate = 0;
-  const totalTaxRebate = primaryTaxRebate + sdppTaxRebate;
+  const sdppTaxRebate = isComboEnabled
+    ? Math.min(Math.round((comboSdppDeposit || 0) * comboMultiplier * 0.10), 750000)
+    : 0;
+  const totalTaxRebate = Math.min(primaryTaxRebate + sdppTaxRebate, 750000);
 
   // Partner hospital / diagnostic centre list, shown with the lab-test
   // discount that comes with every policy.
@@ -1018,7 +1024,7 @@ export default function PlanQuotationModal({
                             </div>
                             <div className="bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100 space-y-1">
                               <div className="flex justify-between items-center">
-                                <div className="text-[11px] font-semibold text-emerald-900">Tax rebate (10% of yearly premium)</div>
+                                <div className="text-[11px] font-semibold text-emerald-900">{isSDPP ? 'Tax rebate (10% of yearly deposit)' : 'Tax rebate (10% of yearly premium)'}</div>
                                 <div className="text-right text-sm font-black font-mono text-emerald-700">
                                   Up to {formatCurrency(primaryTaxRebate)} / yr
                                 </div>

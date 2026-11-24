@@ -180,7 +180,8 @@ test('SDPP and combo previews keep the existing layout', () => {
   assert.ok(sdppHtml.includes('2. Uncertainties Coverage'));
   assert.ok(sdppHtml.includes('3. Death Coverage'));
   assert.ok(sdppHtml.includes('View hospital list'), 'SDPP shows the hospital perk too');
-  assert.ok(!sdppHtml.includes('Tax rebate (10% of yearly premium)'), 'no rebate line on SDPP deposits');
+  assert.ok(sdppHtml.includes('Tax rebate (10% of yearly deposit)'), 'SDPP shows the rebate on the yearly deposit');
+  assert.ok(sdppHtml.includes(`Up to ${formatCurrency(12000)} / yr`), 'SDPP rebate is 10% of the 1,20,000 yearly deposit');
   const comboHtml = renderPreview(comboFixture());
   assert.ok(comboHtml.includes('COMBINED PREMIUM / DEPOSIT'));
   assert.ok(!comboHtml.includes('Your Plan at a Glance'));
@@ -189,6 +190,9 @@ test('SDPP and combo previews keep the existing layout', () => {
   assert.ok(comboHtml.indexOf('Download PDF') > comboHtml.indexOf('COMBINED PREMIUM / DEPOSIT'), 'buttons sit at the end for combo too');
   assert.ok(comboHtml.includes('PARTNER HOSPITAL LAB TEST DISCOUNT'), 'combo shows the hospital perk too');
   assert.ok(comboHtml.includes('Income Tax Act 2023 (Finance Act 2026)'), 'combo rebate cites the law');
+  assert.ok(comboHtml.includes(`Primary Rebate (${formatCurrency(11569)})`), 'combo primary rebate is 10% of the 1,15,690 yearly premium');
+  assert.ok(comboHtml.includes(`SDPP Rebate (${formatCurrency(12000)})`), 'combo SDPP rebate is 10% of the 1,20,000 yearly deposit');
+  assert.ok(comboHtml.includes(`Up to ${formatCurrency(23569)}`), 'combo total rebate adds both parts');
 });
 
 test('premium breakdown and compare buttons only render when the parent provides the callbacks', () => {
