@@ -1,9 +1,9 @@
 import { savePdf } from '../lib/savePdf';
 import React, { useState, useRef, useEffect } from 'react';
 import { 
-  X, Download, Printer, Shield, Activity, Sparkles, CheckCircle2, 
+  X, Download, Shield, Activity, Sparkles, CheckCircle2, 
   FileText, Calendar, User, Phone, Mail, DollarSign, Clock, HelpCircle,
-  AlertCircle, ChevronRight, Award, Check, Building2, Scale
+  AlertCircle, ChevronRight, Award, Check, Building2, Scale, Share2, Pencil
 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { CalculationInput, CalculationResult, SDPPResult, ProjectionRow } from '../data/types';
@@ -11,11 +11,23 @@ import { createQuotationPdf, quotationFilename } from '../lib/quotationPdf';
 import { accidentalRiderBenefits, modeComparisonRows, naturalDeathCover, scepStipend, stagePayouts } from '../lib/quotationPreview';
 import { CI_MAJOR_BENEFIT_SHARE_AFTER_MINOR, CI_MAJOR_BENEFIT_SHARE_WITHOUT_MINOR, CI_MINOR_BENEFIT_SHARE, ciCoverageAmount, isCiRiderEligible } from '../data/ciDiseases';
 
+// Stage-timeline labels in the board's words: "First stage payout",
+// "Second stage payout", …, the last stage is the "Final maturity".
+const STAGE_ORDINALS = ['First', 'Second', 'Third'];
+function stageTimelineLabel(index: number, isLast: boolean): string {
+  return isLast ? 'Final maturity' : `${STAGE_ORDINALS[index] || `Stage ${index + 1}`} stage payout`;
+}
+
 interface PlanQuotationModalProps {
   isOpen: boolean;
   onClose: () => void;
   embedded?: boolean;
   showProjection?: boolean;
+  /** Cropped projection preview (Quotation tab): first, middle and final
+   *  years only; the full table lives in the Liquidity tab. */
+  projectionPreview?: boolean;
+  /** Takes the user back to the rider step (step 3); falls back to onClose. */
+  onAddRider?: () => void;
   onViewDiseases?: (type: 'classic' | 'standard') => void;
   onViewPremiumBreakdown?: () => void;
   onViewModeComparison?: () => void;
@@ -36,6 +48,8 @@ export default function PlanQuotationModal({
   onClose,
   embedded = false,
   showProjection = true,
+  projectionPreview = false,
+  onAddRider,
   onViewDiseases,
   onViewPremiumBreakdown,
   onViewModeComparison,
@@ -52,6 +66,8 @@ export default function PlanQuotationModal({
 }: PlanQuotationModalProps) {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [shareStatus, setShareStatus] = useState<'idle' | 'shared' | 'copied'>('idle');
+  const [stageTimelineOpen, setStageTimelineOpen] = useState(false);
   const exportInProgress = useRef(false);
   const [documentZoom, setDocumentZoom] = useState(1);
   const documentAreaRef = useRef<HTMLDivElement>(null);
@@ -117,14 +133,35 @@ export default function PlanQuotationModal({
     ? (input.ciCoverage || ciCoverageAmount(input.sumAssured))
     : 0;
   const standardAdb = input.hasAccidentalProtection ? accidentalRiderBenefits(input.sumAssured) : null;
+  // Uncertainties Coverage (part 2 of the benefits) exists when a rider
+  // covers illness or accident; without riders the panel stays visible
+  // with an invitation to add one instead of hiding.
+  const hasUncertaintiesStandard = Boolean(standardAdb) || standardCiCoverage > 0;
+  // Single-premium plans have no rider step, so the empty Uncertainties
+  // state says so instead of offering a rider.
+  const isSinglePremiumStandard = selectedProduct?.productId === 'sspe' || Boolean(selectedProduct?.productId?.startsWith('scep_single_'));
 
-  // The mode comparison lives behind the Compare button now, so the visible
-  // sections are always numbered in order: 1 summary, 2 benefits, 3
-  // projection. The Compare button itself only shows when the plan offers
-  // more than one mode (single-premium plans have nothing to compare).
+  // The mode comparison lives behind the Compare button now. The Compare
+  // button itself only shows when the plan offers more than one mode
+  // (single-premium plans have nothing to compare).
   const standardHasModes = standardModeRows.length > 1;
-  const standardBenefitsNum = 2;
-  const standardProjectionNum = 3;
+
+  // Hero premium period suffix: "/ year", "/ month", … or "one-time".
+  const heroPeriodSuffix = input.paymentMethod === 'Single' ? 'one-time'
+    : input.paymentMethod === 'Monthly' ? '/ month'
+    : input.paymentMethod === 'Quarterly' ? '/ quarter'
+    : input.paymentMethod === 'Half-yearly' ? '/ 6 months'
+    : '/ year';
+
+  // Cropped projection preview (Quotation tab): first year, two middle
+  // years and the final year — for term 15 that is 1 / 5 / 10 / 15. The
+  // full table lives in the Liquidity tab; the standalone modal shows it.
+  const projectionPreviewYears = projectionPreview
+    ? Array.from(new Set([1, Math.round(input.term / 3), Math.round((2 * input.term) / 3), input.term])).filter(y => y >= 1 && y <= input.term).sort((a, b) => a - b)
+    : null;
+  const projectionRowsShown = projectionPreviewYears
+    ? projectionData.filter(row => projectionPreviewYears.includes(row.year))
+    : projectionData;
 
   // Target Sum Assured calculation
   const calculatedSdppSa = typeof sdppData?.deathBenefit === 'number' 
@@ -204,11 +241,31 @@ export default function PlanQuotationModal({
   const sdppCiVal = isComboSdppElite ? (sdppComboData?.ciCoverage || Math.round(sdppSaVal * 0.5)) : 0;
   const totalCombinedCI = primaryCiVal + sdppCiVal;
 
-  // No fixed tax-rebate % exists in the product documents (rebate depends on
-  // income and NBR rules), so no rebate amount is calculated or promised.
-  const primaryTaxRebate = 0;
-  const sdppTaxRebate = 0;
-  const totalTaxRebate = primaryTaxRebate + sdppTaxRebate;
+  // Tax rebate — Income Tax Act 2023 s.78, as amended by the Finance Act 2026
+  // (in force from 1 July 2026): 10% of eligible investment, capped at
+  // Tk 7,50,000; the rebate actually allowed is the lowest of 3% of total
+  // income, 10% of eligible investment and Tk 7,50,000. Life-insurance
+  // premium counts as eligible investment up to 10% of the sum assured.
+  // SDPP deposits count too — the rebate base is the year's deposit, at the
+  // same 10% rate and the same Tk 7,50,000 cap (the 10%-of-sum-assured cap
+  // is a life-premium rule and does not apply to deposits). The app does not
+  // know the customer's income or other investments, so the figure shown is
+  // this policy's own contribution — an "up to" amount, not a promise.
+  const yearlyPremiumForRebate = input.paymentMethod === 'Single'
+    ? (selectedProduct?.totalPremium?.['Single'] || 0)
+    : (selectedProduct?.totalPremium?.['Yearly'] || 0);
+  const eligiblePremiumForRebate = isSDPP
+    ? basicDepositAnnual
+    : Math.min(yearlyPremiumForRebate, input.sumAssured * 0.10);
+  const primaryTaxRebate = Math.min(Math.round(eligiblePremiumForRebate * 0.10), 750000);
+  const sdppTaxRebate = isComboEnabled
+    ? Math.min(Math.round((comboSdppDeposit || 0) * comboMultiplier * 0.10), 750000)
+    : 0;
+  const totalTaxRebate = Math.min(primaryTaxRebate + sdppTaxRebate, 750000);
+
+  // Partner hospital / diagnostic centre list, shown with the lab-test
+  // discount that comes with every policy.
+  const PARTNER_HOSPITAL_LIST_URL = 'https://shantalife.com/support#hospitals';
 
   const handleDownloadPdf = async () => {
     if (exportInProgress.current) return;
@@ -232,8 +289,32 @@ export default function PlanQuotationModal({
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  // Share the illustration: the device share sheet where available, with a
+  // clipboard fallback (the URL is the app itself — no figures leave the
+  // device beyond the short summary text).
+  const handleShare = async () => {
+    const shareText = `${selectedProduct?.productName || 'Shanta Insurance Policy'} — ${input.term} years, premium ${formatCurrency(selectedProduct?.totalPremium?.[input.paymentMethod] || 0)}${input.paymentMethod === 'Single' ? ' one-time' : ` per ${(input.paymentMethod || 'payment').toLowerCase()}`}, cover ${formatCurrency(displayTargetSumAssured)}.`;
+    const shareData = { title: 'PremiumPulse illustration', text: shareText, url: window.location.href };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        setShareStatus('shared');
+      } else {
+        await navigator.clipboard.writeText(`${shareText} ${window.location.href}`);
+        setShareStatus('copied');
+      }
+    } catch (error) {
+      // User dismissed the share sheet — back to idle, silently.
+      if (error instanceof Error && error.name === 'AbortError') return;
+      try {
+        await navigator.clipboard.writeText(`${shareText} ${window.location.href}`);
+        setShareStatus('copied');
+      } catch {
+        // Clipboard unavailable — nothing to show; the buttons stay.
+        return;
+      }
+    }
+    window.setTimeout(() => setShareStatus('idle'), 3000);
   };
 
   return (
@@ -728,11 +809,24 @@ export default function PlanQuotationModal({
                       <div>
                         <div className="text-xs font-black uppercase text-slate-900">ESTIMATED TOTAL TAX REBATE (10%)</div>
                         <div className="text-[11px] text-slate-500 font-medium">
-                          Primary Rebate ({formatCurrency(primaryTaxRebate)}) + SDPP Rebate ({formatCurrency(sdppTaxRebate)})
+                          Primary Rebate ({formatCurrency(primaryTaxRebate)}) + SDPP Rebate ({formatCurrency(sdppTaxRebate)}) · As per Income Tax Act 2023 (Finance Act 2026)
                         </div>
                       </div>
                       <div className="font-mono font-black text-lg text-brand-primary text-right">
-                        {formatCurrency(totalTaxRebate)}
+                        Up to {formatCurrency(totalTaxRebate)}
+                      </div>
+                    </div>
+
+                    {/* 6. Partner hospital lab-test discount — every policy */}
+                    <div className="bg-slate-50/80 border border-slate-200 rounded-xl p-3.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                      <div>
+                        <div className="text-xs font-black uppercase text-slate-900">PARTNER HOSPITAL LAB TEST DISCOUNT</div>
+                        <div className="text-[11px] text-slate-500 font-medium">
+                          At partner hospitals & diagnostic centers · <a href={PARTNER_HOSPITAL_LIST_URL} target="_blank" rel="noreferrer" className="font-bold text-brand-primary underline underline-offset-2 print:hidden">View hospital list →</a>
+                        </div>
+                      </div>
+                      <div className="font-mono font-black text-lg text-brand-primary text-right">
+                        Up to 40%
                       </div>
                     </div>
 
@@ -959,12 +1053,13 @@ export default function PlanQuotationModal({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     
-                    {/* Maturity & Living Benefits */}
+                    {/* 1. Survival Benefits */}
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                       <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
                         <Sparkles className="w-4 h-4 text-brand-primary" />
-                        <h4 className="text-xs font-black uppercase text-slate-900">Survival, Living Benefits & Maturity</h4>
+                        <h4 className="text-xs font-black uppercase text-slate-900">1. Survival Benefits</h4>
                       </div>
+                      <p className="text-[11px] text-slate-500">What you receive while alive and healthy.</p>
                       <div className="space-y-2.5 text-xs">
                         <div className="space-y-0.5 pb-1">
                           <div className="text-[11px] font-semibold text-slate-700">Policy Maturity Benefit</div>
@@ -979,46 +1074,35 @@ export default function PlanQuotationModal({
                           </div>
                         </div>
 
-                        {/* Living Benefit - Critical Illness */}
-                        {(isSDPP ? Boolean(sdppData?.ciCoverage) : Boolean(input.hasCIClassic || input.hasCIStandard || input.ciCoverage)) && (
+                        {/* Tax Rebate — 10% of yearly premium (Income Tax Act 2023) */}
+                        {primaryTaxRebate > 0 && (
                           <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
-                            <div className="text-[10px] font-black uppercase tracking-wider text-purple-800">
-                              Living Benefit - Critical Illness (CI)
+                            <div className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
+                              Tax Rebate
                             </div>
-                            <div className="bg-purple-50/50 p-2.5 rounded-lg border border-purple-100 space-y-0.5">
-                              <div className="text-[11px] font-semibold text-purple-900">{input.hasCIClassic ? 'Critical Illness Classic' : input.hasCIStandard ? 'Critical Illness Standard' : 'Critical Illness Coverage'}</div>{(input.hasCIClassic || input.hasCIStandard) && onViewDiseases && <button type="button" onClick={()=>onViewDiseases(input.hasCIClassic ? 'classic' : 'standard')} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">View Diseases →</button>}
-                              <div className="text-right text-sm font-black font-mono text-purple-700">
-                                Up to {formatCurrency(isSDPP ? (sdppData?.ciCoverage || 0) : (input.ciCoverage || Math.min(input.sumAssured * 0.5, 1500000)))}
+                            <div className="bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100 space-y-1">
+                              <div className="flex justify-between items-center">
+                                <div className="text-[11px] font-semibold text-emerald-900">{isSDPP ? 'Tax rebate (10% of yearly deposit)' : 'Tax rebate (10% of yearly premium)'}</div>
+                                <div className="text-right text-sm font-black font-mono text-emerald-700">
+                                  Up to {formatCurrency(primaryTaxRebate)} / yr
+                                </div>
+                              </div>
+                              <div className="text-[9px] text-emerald-700 leading-snug">
+                                As per Income Tax Act 2023 (Finance Act 2026). Actual rebate is the lowest of 3% of your total income, 10% of eligible investment and ৳7,50,000.
                               </div>
                             </div>
                           </div>
                         )}
 
-                        {/* Living Benefit - Tax Rebate */}
-                        <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
-                          <div className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
-                            Living Benefit - Tax Rebate
-                          </div>
-                          <div className="bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100 flex justify-between items-center">
-                            <div>
-                              <div className="text-[11px] font-semibold text-emerald-900">Tax Rebate Benefit (10% Est.)</div>
-                              <div className="text-[9px] text-emerald-700">Annual Income Tax Savings</div>
-                            </div>
-                            <div className="text-right text-sm font-black font-mono text-emerald-700">
-                              {formatCurrency(primaryTaxRebate)}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Living Benefit - Partner Hospital Discount */}
+                        {/* Partner hospital lab-test discount — every policy */}
                         <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
                           <div className="text-[10px] font-black uppercase tracking-wider text-blue-800">
-                            Living Benefit - Healthcare Perks
+                            Healthcare Perks
                           </div>
                           <div className="bg-blue-50/50 p-2.5 rounded-lg border border-blue-100 flex justify-between items-center">
                             <div>
-                              <div className="text-[11px] font-semibold text-blue-900">Partner Hospital Discount</div>
-                              <div className="text-[9px] text-blue-700">At partner hospitals & diagnostic centers</div>
+                              <div className="text-[11px] font-semibold text-blue-900">Lab test discount at partner hospitals & diagnostic centers</div>
+                              <div className="text-[9px] text-blue-700"><a href={PARTNER_HOSPITAL_LIST_URL} target="_blank" rel="noreferrer" className="font-bold text-brand-primary underline underline-offset-2 print:hidden">View hospital list →</a></div>
                             </div>
                             <div className="text-right text-sm font-black font-mono text-blue-700">
                               Up to 40%
@@ -1114,12 +1198,87 @@ export default function PlanQuotationModal({
                     </div>
 
 
-                    {/* Life Cover & Death Benefit */}
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                    {/* 2. Uncertainties Coverage — illness or accident while alive */}
+                    {(isSDPP ? (Boolean(sdppData?.ciCoverage) || (sdppData?.accidentalBenefit || 0) > 0) : Boolean(input.hasCIClassic || input.hasCIStandard || input.ciCoverage || input.hasAccidentalProtection)) && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                        <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                          <Activity className="w-4 h-4 text-brand-primary" />
+                          <h4 className="text-xs font-black uppercase text-slate-900">2. Uncertainties Coverage</h4>
+                        </div>
+                        <p className="text-[11px] text-slate-500">If illness or an accident strikes.</p>
+                        <div className="space-y-2.5 text-xs">
+                          {/* Critical Illness */}
+                          {(isSDPP ? Boolean(sdppData?.ciCoverage) : Boolean(input.hasCIClassic || input.hasCIStandard || input.ciCoverage)) && (
+                            <div className="space-y-1.5">
+                              <div className="text-[10px] font-black uppercase tracking-wider text-purple-800">
+                                Critical Illness (CI)
+                              </div>
+                              <div className="bg-purple-50/50 p-2.5 rounded-lg border border-purple-100 space-y-0.5">
+                                <div className="text-[11px] font-semibold text-purple-900">{input.hasCIClassic ? 'Critical Illness Classic' : input.hasCIStandard ? 'Critical Illness Standard' : 'Critical Illness Coverage'}</div>{(input.hasCIClassic || input.hasCIStandard) && onViewDiseases && <button type="button" onClick={()=>onViewDiseases(input.hasCIClassic ? 'classic' : 'standard')} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">View Diseases →</button>}
+                                <div className="text-right text-sm font-black font-mono text-purple-700">
+                                  Up to {formatCurrency(isSDPP ? (sdppData?.ciCoverage || 0) : (input.ciCoverage || Math.min(input.sumAssured * 0.5, 1500000)))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* SDPP accidental disability (built-in) */}
+                          {isSDPP && (sdppData?.accidentalBenefit || 0) > 0 && (
+                            <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+                              <div className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
+                                Accidental Disability
+                              </div>
+                              <div className="bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100 flex justify-between items-center">
+                                <div>
+                                  <div className="text-[11px] font-semibold text-emerald-900">Accidental Permanent Total Disability (APTD)</div>
+                                  <div className="text-[9px] text-emerald-700">Double Sum Assured (200% SA)</div>
+                                </div>
+                                <div className="text-right text-sm font-black font-mono text-emerald-700">
+                                  {formatCurrency(sdppData?.accidentalBenefit || 0)}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Standard accidental rider — disability & medical parts */}
+                          {!isSDPP && input.hasAccidentalProtection && (
+                            <div className="pt-2 border-t border-slate-200/80 space-y-2">
+                              <div className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
+                                Accidental Rider — Disability & Medical
+                              </div>
+                              <div className="space-y-2 bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100">
+                                <div className="border-b border-emerald-200/50 pb-1.5 space-y-0.5">
+                                  <div className="text-[11px] font-semibold text-emerald-900">Accidental Medical Reimbursement (AMR)</div>
+                                  <div className="text-right text-sm font-black font-mono text-emerald-700">
+                                    Up to {formatCurrency(input.sumAssured * 0.15)} <span className="text-[10px] font-bold text-emerald-800">(15%)</span>
+                                  </div>
+                                </div>
+                                <div className="border-b border-emerald-200/50 pb-1.5 space-y-0.5">
+                                  <div className="text-[11px] font-semibold text-emerald-900">Accidental Permanent Total Disability (APTD)</div>
+                                  <div className="text-right text-sm font-black font-mono text-emerald-700">
+                                    {formatCurrency(input.sumAssured)} <span className="text-[10px] font-bold text-emerald-800">(100%)</span>
+                                  </div>
+                                </div>
+                                <div className="space-y-0.5">
+                                  <div className="text-[11px] font-semibold text-emerald-900">Accidental Permanent Partial Disability (APPD)</div>
+                                  <div className="text-right text-sm font-black font-mono text-emerald-700">
+                                    Up to {formatCurrency(input.sumAssured)} <span className="text-[10px] font-bold text-emerald-800">(100%)</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. Death Coverage */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3 sm:col-span-2">
                       <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
                         <Shield className="w-4 h-4 text-brand-primary" />
-                        <h4 className="text-xs font-black uppercase text-slate-900">Life Protection & Death Cover</h4>
+                        <h4 className="text-xs font-black uppercase text-slate-900">3. Death Coverage</h4>
                       </div>
+                      <p className="text-[11px] text-slate-500">If the policyholder dies — paid to your nominee.</p>
                       <div className="space-y-2.5 text-xs">
                         <div className="space-y-0.5 pb-1">
                           <div className="text-[11px] font-semibold text-slate-700">Natural Death Cover (Life Cover)</div>
@@ -1156,15 +1315,14 @@ export default function PlanQuotationModal({
                           </div>
                         )}
 
-                        {/* SDPP Accidental Coverage or Standard Accidental Rider */}
+                        {/* Accidental Death Benefit (death part of the accidental cover) */}
                         {isSDPP ? (
                           <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
                             <div className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
-                              Accidental Coverage
+                              Accidental Death Benefit
                             </div>
-                            <div className="bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100 space-y-2">
-                              {/* 1. Accidental Death Benefit */}
-                              <div className="border-b border-emerald-200/50 pb-1.5 flex justify-between items-center">
+                            <div className="bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100">
+                              <div className="flex justify-between items-center">
                                 <div>
                                   <div className="text-[11px] font-semibold text-emerald-900">Accidental Death Benefit</div>
                                   <div className="text-[9px] text-emerald-700">
@@ -1179,53 +1337,19 @@ export default function PlanQuotationModal({
                                   )}
                                 </div>
                               </div>
-
-                              {/* 2. Accidental Permanent Total Disability (APTD) */}
-                              <div className="flex justify-between items-center">
-                                <div>
-                                  <div className="text-[11px] font-semibold text-emerald-900">Accidental Permanent Total Disability (APTD)</div>
-                                  <div className="text-[9px] text-emerald-700">
-                                    Double Sum Assured (200% SA)
-                                  </div>
-                                </div>
-                                <div className="text-right text-sm font-black font-mono text-emerald-700">
-                                  {formatCurrency(sdppData?.accidentalBenefit || 0)}
-                                </div>
-                              </div>
                             </div>
                           </div>
                         ) : (
                           input.hasAccidentalProtection && (
                             <div className="pt-2 border-t border-slate-200/80 space-y-2">
                               <div className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
-                                Accidental Rider Protection (4 Coverages)
+                                Accidental Rider — Death Benefit
                               </div>
-                              <div className="space-y-2 bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100">
-                                <div className="border-b border-emerald-200/50 pb-1.5 space-y-0.5">
-                                  <div className="text-[11px] font-semibold text-emerald-900">1. Accidental Death Benefit (200%)</div>
+                              <div className="bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100">
+                                <div className="space-y-0.5">
+                                  <div className="text-[11px] font-semibold text-emerald-900">Accidental Death Benefit (200%)</div>
                                   <div className="text-right text-sm font-black font-mono text-emerald-700">
                                     {formatCurrency(input.sumAssured * 2)}
-                                  </div>
-                                </div>
-
-                                <div className="border-b border-emerald-200/50 pb-1.5 space-y-0.5">
-                                  <div className="text-[11px] font-semibold text-emerald-900">2. Accidental Medical Reimbursement (AMR)</div>
-                                  <div className="text-right text-sm font-black font-mono text-emerald-700">
-                                    Up to {formatCurrency(input.sumAssured * 0.15)} <span className="text-[10px] font-bold text-emerald-800">(15%)</span>
-                                  </div>
-                                </div>
-
-                                <div className="border-b border-emerald-200/50 pb-1.5 space-y-0.5">
-                                  <div className="text-[11px] font-semibold text-emerald-900">3. Accidental Permanent Total Disability (APTD)</div>
-                                  <div className="text-right text-sm font-black font-mono text-emerald-700">
-                                    {formatCurrency(input.sumAssured)} <span className="text-[10px] font-bold text-emerald-800">(100%)</span>
-                                  </div>
-                                </div>
-
-                                <div className="space-y-0.5">
-                                  <div className="text-[11px] font-semibold text-emerald-900">4. Accidental Permanent Partial Disability (APPD)</div>
-                                  <div className="text-right text-sm font-black font-mono text-emerald-700">
-                                    Up to {formatCurrency(input.sumAssured)} <span className="text-[10px] font-bold text-emerald-800">(100%)</span>
                                   </div>
                                 </div>
                               </div>
@@ -1285,33 +1409,44 @@ export default function PlanQuotationModal({
               data-page="1"
               className="w-full space-y-4 sm:space-y-6"
             >
-              {/* Slim heading — product + term only */}
+              {/* Heading — your illustration, with the plan at a glance */}
               <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-lg font-bold text-brand-text">{selectedProduct?.productName || 'Shanta Insurance Policy'}</h2>
-                  <span className="rounded-full bg-[#f0f1df] px-3 py-1 text-xs font-bold text-brand-text">{input.term} Years</span>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-bold text-brand-text">Your illustration</h2>
+                    <p className="mt-0.5 text-xs font-bold uppercase tracking-wider text-slate-500">{selectedProduct?.productName || 'Shanta Insurance Policy'} · {input.term} yrs · {input.paymentMethod}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    title="Edit inputs"
+                    aria-label="Edit inputs"
+                    className="p-2 rounded-full border border-[#e5e8df] bg-white text-brand-primary hover:bg-[#f7f8ef] transition-all cursor-pointer flex-shrink-0 print:hidden"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
                 </div>
-                <p className="mt-1 text-[11px] text-slate-400">Unofficial sample illustration</p>
+                <p className="mt-1 text-[11px] text-slate-400">Unofficial — created by the Training &amp; Development Team</p>
               </div>
               {/* Redesigned standard quotation — single non-SDPP policy.
-                  Order: 1. selected plan summary (Breakdown and Compare open
-                  their dialogs from the premium tile), 2. core benefits
-                  (survival, death, riders). Combo and SDPP keep the existing
-                  layouts above. */}
+                  Order: premium + coverage hero, then benefits in three
+                  parts (survival, uncertainties, death). Combo and SDPP
+                  keep the existing layouts above. */}
               <div className="space-y-4 sm:space-y-6">
-                {/* 1. Your plan at a glance — selected product + selected mode */}
+                {/* Premium and coverage first, highlighted — the two numbers
+                    every customer asks about. Total payable sits small
+                    under the premium; maturity and death cover live in
+                    the benefit sections below. */}
                 <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-3">
-                  <h3 className="text-xs font-black uppercase tracking-wider text-brand-text border-b-2 border-brand-primary/40 pb-2 flex items-center justify-between">
-                    <span>1. Your Plan at a Glance</span>
-                    <span className="text-[10px] font-mono text-slate-500">All amounts in BDT (৳)</span>
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <div className="rounded-xl border border-[#e5e8df] bg-white p-3">
-                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{input.paymentMethod} premium</div>
-                      <div className="mt-1 font-mono text-base font-black text-brand-text">{formatCurrency(selectedProduct?.totalPremium?.[input.paymentMethod] || 0)}</div>
-                      <div className="mt-0.5 text-[10px] text-slate-500">per payment</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="rounded-xl border-2 border-brand-primary bg-[#F9FAF3] p-4">
+                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">You pay</div>
+                      <div className="mt-1 font-mono text-2xl font-black text-brand-primary">{formatCurrency(selectedProduct?.totalPremium?.[input.paymentMethod] || 0)} <small className="text-sm font-bold text-slate-500">{heroPeriodSuffix}</small></div>
+                      <div className="mt-2 border-t border-brand-primary/20 pt-2 text-[11px] text-slate-600">
+                        Total payable over {input.term} yrs<br /><span className="font-mono font-bold text-brand-text">{formatCurrency(primaryPaid)}</span>
+                      </div>
                       {(onViewPremiumBreakdown || (onViewModeComparison && standardHasModes)) && (
-                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
                           {onViewPremiumBreakdown && (
                             <button type="button" onClick={onViewPremiumBreakdown} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">Breakdown →</button>
                           )}
@@ -1321,70 +1456,109 @@ export default function PlanQuotationModal({
                         </div>
                       )}
                     </div>
-                    <div className="rounded-xl border border-[#e5e8df] bg-white p-3">
-                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Total premium paid</div>
-                      <div className="mt-1 font-mono text-base font-black text-brand-text">{formatCurrency(primaryPaid)}</div>
-                      <div className="mt-0.5 text-[10px] text-slate-500">over {input.term} years</div>
-                    </div>
-                    <div className="rounded-xl border border-brand-primary/40 bg-[#F9FAF3] p-3">
-                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Maturity payout</div>
-                      <div className="mt-1 font-mono text-base font-black text-brand-primary">{formatCurrency(primaryMaturity)}</div>
-                      <div className="mt-0.5 text-[10px] text-slate-500">{standardStages.length > 0 ? `in ${standardStages.length} stage payouts` : `at year ${input.term} (${issueYear + input.term})`}</div>
-                    </div>
-                    <div className="rounded-xl border border-brand-primary/40 bg-[#F9FAF3] p-3">
-                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Death cover</div>
-                      <div className="mt-1 font-mono text-base font-black text-brand-primary">{formatCurrency(standardDeathCover)}</div>
-                      <div className="mt-0.5 text-[10px] text-slate-500">paid to your nominee</div>
+                    <div className="rounded-xl border-2 border-brand-primary bg-[#F9FAF3] p-4">
+                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">You are covered for</div>
+                      <div className="mt-1 font-mono text-2xl font-black text-brand-primary">{formatCurrency(displayTargetSumAssured)}</div>
+                      <div className="mt-0.5 text-[10px] text-slate-500">Sum Assured — your family’s protection amount</div>
                     </div>
                   </div>
                 </div>
 
-                {/* 2. Core benefits */}
+                {/* What you get — benefits in three parts */}
                 <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-4">
                   <h3 className="text-xs font-black uppercase tracking-wider text-brand-text border-b-2 border-brand-primary/40 pb-2">
-                    {standardBenefitsNum}. Core Benefits
+                    What you get
                   </h3>
 
-                  {/* Survival and death panels sit side by side on wider screens
-                      (they stack on mobile) so the full-width layout reads well. */}
-                  <div className="grid gap-4 md:grid-cols-2">
-                  {/* Survival benefits — what you receive while alive */}
+                  {/* Stage timeline — desktop: one horizontal strip above the
+                      three benefit parts (stage plans only). The same dates
+                      appear in the Survival panel's expandable timeline on
+                      mobile. */}
+                  {standardStages.length > 0 && (
+                    <div className="hidden lg:block space-y-3">
+                      <h4 className="text-[11px] font-black uppercase tracking-wider text-slate-700">Your money back while alive — stage payouts</h4>
+                      <div className="relative">
+                        <div className="absolute left-0 right-0 top-[5px] border-t-2 border-brand-primary/30" aria-hidden="true" />
+                        <div className="relative grid" style={{ gridTemplateColumns: `repeat(${standardStages.length}, minmax(0, 1fr))` }}>
+                          {standardStages.map((stage, i) => (
+                            <div key={stage.label} className="pr-4">
+                              <div className="w-2.5 h-2.5 rounded-full bg-brand-primary ring-4 ring-white" />
+                              <div className="mt-2 text-[11px] font-bold text-slate-500">Year {stage.policyYear} · {stage.calendarYear}</div>
+                              <div className="text-xs font-bold text-brand-text">{stageTimelineLabel(i, i === standardStages.length - 1)}</div>
+                              <div className="font-mono font-black text-sm text-brand-primary">{formatCurrency(stage.amount)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 rounded-lg bg-[#f0f1df] px-3 py-2">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-brand-text">Total you receive</span>
+                        <span className="text-[11px] text-slate-500">stages add up to the full cover</span>
+                        <span className="font-mono font-black text-sm text-brand-primary">{formatCurrency(input.sumAssured)}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Benefits in three parts: what you receive while alive,
+                      what covers illness or accident, what your family
+                      receives on death. Riders sort into the part their
+                      benefit belongs to. Three columns side by side on
+                      wide screens; two columns below that. */}
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {/* 1. Survival Benefits — what you receive while alive */}
                   <div className="bg-[#f7f8ef] border border-[#e5e8df] rounded-xl p-4 space-y-3">
                     <h4 className="text-xs font-black uppercase text-brand-text flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-brand-primary" /> If you stay alive — survival benefits
+                      <Sparkles className="w-4 h-4 text-brand-primary" /> 1. Survival Benefits
                     </h4>
+                    <p className="text-[11px] text-slate-500">While you are alive &amp; well — money back to you.</p>
                     {standardStages.length > 0 ? (
-                      <div className="space-y-2">
-                        <div className="overflow-x-auto border border-[#e5e8df] rounded-lg bg-white">
-                          <table className="w-full text-left text-xs border-collapse">
-                            <thead>
-                              <tr className="bg-[#f0f1df] font-bold text-[10px] uppercase tracking-wider text-slate-700">
-                                <th className="p-2.5 border-r border-[#e5e8df]">Payout</th>
-                                <th className="p-2.5 border-r border-[#e5e8df] text-center">Policy year</th>
-                                <th className="p-2.5 border-r border-[#e5e8df] text-center">Calendar year</th>
-                                <th className="p-2.5 text-right">Amount</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-[#e5e8df]">
-                              {standardStages.map((stage) => (
-                                <tr key={stage.label} className="hover:bg-[#f7f8ef]">
-                                  <td className="p-2.5 border-r border-[#e5e8df] font-bold text-brand-text">{stage.label} ({stage.percent}%)</td>
-                                  <td className="p-2.5 border-r border-[#e5e8df] text-center font-mono">Year {stage.policyYear}</td>
-                                  <td className="p-2.5 border-r border-[#e5e8df] text-center font-mono">{stage.calendarYear}</td>
-                                  <td className="p-2.5 text-right font-mono font-bold text-brand-text">{formatCurrency(stage.amount)}</td>
-                                </tr>
-                              ))}
-                              <tr className="bg-[#f0f1df] font-black text-brand-text">
-                                <td colSpan={3} className="p-2.5 border-r border-[#e5e8df] uppercase text-[10px] tracking-wider">Total you will receive</td>
-                                <td className="p-2.5 text-right font-mono text-brand-primary">{formatCurrency(input.sumAssured)}</td>
-                              </tr>
-                            </tbody>
-                          </table>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-start gap-2">
+                          <div>
+                            <div className="text-xs font-bold text-brand-text">Total you receive</div>
+                            <div className="text-[11px] text-slate-500">paid back in stages, by {issueYear + input.term}</div>
+                          </div>
+                          <div className="font-mono font-black text-base text-brand-primary text-right">{formatCurrency(input.sumAssured)}</div>
                         </div>
-                        <p className="text-[11px] text-slate-500">Stage payouts are part of the full sum assured — not additional to it.</p>
+                        <div className="flex justify-between items-start gap-2 pt-2 border-t border-[#e5e8df]">
+                          <div>
+                            <div className="text-xs font-bold text-brand-text">Stage payouts</div>
+                            <div className="text-[11px] text-slate-500 whitespace-nowrap">{standardStages.map(s => s.calendarYear).join(' · ')}</div>
+                          </div>
+                          <div className="font-bold text-sm text-brand-text text-right">{standardStages.slice(0, -1).map(s => formatCurrency(s.amount)).join(' + ')}<br />+ {formatCurrency(standardStages[standardStages.length - 1].amount)}</div>
+                        </div>
+                        {/* Stage dates — expandable timeline on mobile; the
+                            desktop strip above the columns shows the same.
+                            Always rendered so the dates stay in the DOM. */}
+                        <div className="lg:hidden pt-2 border-t border-[#e5e8df]">
+                          <button
+                            type="button"
+                            onClick={() => setStageTimelineOpen(v => !v)}
+                            aria-expanded={stageTimelineOpen}
+                            className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 cursor-pointer"
+                          >
+                            {stageTimelineOpen ? 'Hide stage dates' : 'See stage dates →'}
+                          </button>
+                          <div className={stageTimelineOpen ? 'mt-2 space-y-2' : 'hidden'}>
+                            {standardStages.map((stage, i) => (
+                              <div key={stage.label} className="flex items-center gap-2 text-xs">
+                                <span className="w-2 h-2 rounded-full bg-brand-primary flex-shrink-0" />
+                                <span className="font-bold text-brand-text">{stageTimelineLabel(i, i === standardStages.length - 1)}</span>
+                                <span className="text-slate-500">Year {stage.policyYear} · {stage.calendarYear}</span>
+                                <span className="ml-auto font-mono font-bold text-brand-text">{formatCurrency(stage.amount)}</span>
+                              </div>
+                            ))}
+                            <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#e5e8df]">
+                              <div>
+                                <div className="text-xs font-bold text-brand-text">Total you receive</div>
+                                <div className="text-[11px] text-slate-500">stages add up to the full cover</div>
+                              </div>
+                              <div className="font-mono font-black text-sm text-brand-primary">{formatCurrency(input.sumAssured)}</div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     ) : (
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                      <div className="flex justify-between items-start gap-2">
                         <div>
                           <div className="text-xs font-bold text-brand-text">Maturity payout — Year {input.term} ({issueYear + input.term})</div>
                           {isChildPlan && <div className="text-[11px] text-slate-500">Paid at maturity even after the stipend starts.</div>}
@@ -1392,65 +1566,42 @@ export default function PlanQuotationModal({
                         <div className="font-mono font-black text-base text-brand-primary text-right">{formatCurrency(primaryMaturity)}</div>
                       </div>
                     )}
-                  </div>
 
-                  {/* Death benefits — including the Child Education stipend story */}
-                  <div className="bg-[#f7f8ef] border border-[#e5e8df] rounded-xl p-4 space-y-3">
-                    <h4 className="text-xs font-black uppercase text-brand-text flex items-center gap-2">
-                      <Shield className="w-4 h-4 text-brand-primary" /> If the policyholder dies
-                    </h4>
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                      <div className="text-xs font-bold text-brand-text">Death cover — paid to your nominee</div>
-                      <div className="font-mono font-black text-base text-brand-text text-right">{formatCurrency(standardDeathCover)}</div>
-                    </div>
-                    {isChildPlan && standardStipend && (
-                      <div className="space-y-2 pt-2 border-t border-[#e5e8df]">
-                        <div className="rounded-lg border-2 border-[#F37021] bg-[#FFF4ED] p-3 space-y-1">
-                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                            <div>
-                              <div className="text-xs font-black uppercase text-brand-text">Monthly education stipend — {Math.round(standardStipend.percent * 100)}% of sum assured</div>
-                              <div className="text-[11px] text-slate-600">Paid every month until maturity, so your child's education continues.</div>
-                            </div>
-                            <div className="font-mono font-black text-base text-brand-text text-right whitespace-nowrap">{formatCurrency(standardStipend.monthly)} <span className="text-xs font-bold">/ month</span></div>
-                          </div>
+                    {/* Tax rebate — 10% of yearly premium (Income Tax Act 2023) */}
+                    {primaryTaxRebate > 0 && (
+                      <div className="space-y-1 pt-3 border-t border-[#e5e8df]">
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="text-xs font-bold text-brand-text">Tax rebate (10% of yearly premium)</div>
+                          <div className="font-mono font-black text-base text-brand-primary text-right whitespace-nowrap">Up to {formatCurrency(primaryTaxRebate)} / yr</div>
                         </div>
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs">
-                          <div className="font-bold text-brand-text">At maturity — full sum assured again</div>
-                          <div className="font-mono font-black text-brand-text text-right">{formatCurrency(input.sumAssured)}</div>
-                        </div>
-                        <p className="text-[11px] text-slate-500">Future premiums are waived — subject to covered event and policy terms.</p>
+                        <p className="text-[11px] text-slate-500">As per Income Tax Act 2023 (Finance Act 2026). Actual rebate is the lowest of 3% of your total income, 10% of eligible investment and ৳7,50,000.</p>
                       </div>
                     )}
-                  </div>
+
+                    {/* Partner hospital lab-test discount — every policy */}
+                    <div className="space-y-1 pt-3 border-t border-[#e5e8df]">
+                      <div className="flex justify-between items-start gap-2">
+                        <div>
+                          <div className="text-xs font-bold text-brand-text">Lab test discount at partner hospitals & diagnostic centers</div>
+                          <a href={PARTNER_HOSPITAL_LIST_URL} target="_blank" rel="noreferrer" className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">View hospital list →</a>
+                        </div>
+                        <div className="font-mono font-black text-base text-brand-primary text-right whitespace-nowrap">Up to 40%</div>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Rider benefits — only the riders actually selected */}
-                  {(standardAdb || standardCiCoverage > 0) && (
-                    <div className="bg-[#f7f8ef] border border-[#e5e8df] rounded-xl p-4 space-y-4">
-                      <h4 className="text-xs font-black uppercase text-brand-text flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-brand-primary" /> Your riders
-                      </h4>
-                      {standardAdb && (
-                        <div className="space-y-2">
-                          <div className="text-[11px] font-black uppercase tracking-wider text-slate-700">Accidental Protection rider</div>
-                          <div className="space-y-1.5 text-xs">
-                            <div className="flex justify-between items-center gap-2">
-                              <span className="text-slate-700">Accidental death cover (total, including base cover)</span>
-                              <span className="font-mono font-bold text-brand-text text-right">{formatCurrency(standardAdb.deathCoverTotal)}</span>
-                            </div>
-                            <div className="flex justify-between items-center gap-2">
-                              <span className="text-slate-700">Permanent total / partial disability — each</span>
-                              <span className="font-mono font-bold text-brand-text text-right">{formatCurrency(standardAdb.disabilityEach)}</span>
-                            </div>
-                            <div className="flex justify-between items-center gap-2">
-                              <span className="text-slate-700">Accidental medical reimbursement — up to</span>
-                              <span className="font-mono font-bold text-brand-text text-right">{formatCurrency(standardAdb.medicalReimbursementMax)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                  {/* 2. Uncertainties Coverage — illness or accident while alive.
+                      Always rendered: with no rider it invites the user to
+                      add one instead of hiding. */}
+                  <div className="bg-[#f7f8ef] border border-[#e5e8df] rounded-xl p-4 space-y-4">
+                    <h4 className="text-xs font-black uppercase text-brand-text flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-brand-primary" /> 2. Uncertainties Coverage
+                    </h4>
+                    <p className="text-[11px] text-slate-500">If illness or an accident strikes.</p>
+                    {hasUncertaintiesStandard ? (
+                      <>
                       {standardCiCoverage > 0 && (
-                        <div className="space-y-2 pt-3 border-t border-[#e5e8df]">
+                        <div className="space-y-2">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="text-[11px] font-black uppercase tracking-wider text-slate-700">Critical Illness — {input.hasCIClassic ? 'Classic' : 'Standard'} rider</div>
                             {(input.hasCIClassic || input.hasCIStandard) && onViewDiseases && <button type="button" onClick={() => onViewDiseases(input.hasCIClassic ? 'classic' : 'standard')} className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 print:hidden">View Diseases →</button>}
@@ -1477,36 +1628,115 @@ export default function PlanQuotationModal({
                           </div>
                         </div>
                       )}
+                      {standardAdb && (
+                        <div className="space-y-2 pt-3 border-t border-[#e5e8df]">
+                          <div className="text-[11px] font-black uppercase tracking-wider text-slate-700">Accidental Protection rider — disability & medical</div>
+                          <div className="space-y-1.5 text-xs">
+                            <div className="flex justify-between items-center gap-2">
+                              <span className="text-slate-700">Permanent total / partial disability — each</span>
+                              <span className="font-mono font-bold text-brand-text text-right">{formatCurrency(standardAdb.disabilityEach)}</span>
+                            </div>
+                            <div className="flex justify-between items-center gap-2">
+                              <span className="text-slate-700">Accidental medical reimbursement — up to</span>
+                              <span className="font-mono font-bold text-brand-text text-right">{formatCurrency(standardAdb.medicalReimbursementMax)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      </>
+                    ) : isSinglePremiumStandard ? (
+                      <p className="text-xs text-slate-600">No illness or accident cover added yet. Riders are not available on single-payment plans.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="text-xs text-slate-600">No illness or accident cover added yet.</p>
+                        <button
+                          type="button"
+                          onClick={onAddRider ?? onClose}
+                          className="text-[11px] font-extrabold text-brand-primary underline underline-offset-2 cursor-pointer print:hidden"
+                        >
+                          + Add a rider to this plan →
+                        </button>
+                        <p className="hidden lg:block text-[11px] text-slate-500">Critical illness and accidental protection riders fit here — hospital cash, disability and medical costs.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 3. Death Coverage — including the Child Education stipend story */}
+                  <div className="bg-[#f7f8ef] border border-[#e5e8df] rounded-xl p-4 space-y-3 md:col-span-2 xl:col-span-1">
+                    <h4 className="text-xs font-black uppercase text-brand-text flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-brand-primary" /> 3. Death Coverage
+                    </h4>
+                    <p className="text-[11px] text-slate-500">For your family, if you pass away.</p>
+                    {!standardAdb && !isSinglePremiumStandard && (
+                      <p className="hidden lg:block text-[11px] text-slate-500">Add the Accidental Protection rider to cover accidental death at 200% of the sum assured.</p>
+                    )}
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="text-xs font-bold text-brand-text">Death cover — paid to your nominee</div>
+                      <div className="font-mono font-black text-base text-brand-text text-right">{formatCurrency(standardDeathCover)}</div>
                     </div>
-                  )}
+                    {standardAdb && (
+                      <div className="flex justify-between items-start gap-2 pt-2 border-t border-[#e5e8df]">
+                        <div className="text-xs font-bold text-brand-text">Accidental death cover — Accidental Protection rider (total, including base cover)</div>
+                        <div className="font-mono font-black text-base text-brand-text text-right">{formatCurrency(standardAdb.deathCoverTotal)}</div>
+                      </div>
+                    )}
+                    {isChildPlan && standardStipend && (
+                      <div className="space-y-2 pt-2 border-t border-[#e5e8df]">
+                        <div className="rounded-lg border-2 border-[#F37021] bg-[#FFF4ED] p-3 space-y-1">
+                          <div className="flex justify-between items-start gap-2">
+                            <div>
+                              <div className="text-xs font-black uppercase text-brand-text">Monthly education stipend — {Math.round(standardStipend.percent * 100)}% of sum assured</div>
+                              <div className="text-[11px] text-slate-600">Paid every month until maturity, so your child's education continues.</div>
+                            </div>
+                            <div className="font-mono font-black text-base text-brand-text text-right whitespace-nowrap">{formatCurrency(standardStipend.monthly)} <span className="text-xs font-bold">/ month</span></div>
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-start gap-2 text-xs">
+                          <div className="font-bold text-brand-text">At maturity — full sum assured again</div>
+                          <div className="font-mono font-black text-brand-text text-right">{formatCurrency(input.sumAssured)}</div>
+                        </div>
+                        <p className="text-[11px] text-slate-500">Future premiums are waived — subject to covered event and policy terms.</p>
+                      </div>
+                    )}
+                  </div>
+                  </div>
+
                 </div>
               </div>
-              {/* Projection Schedule Table - Matching Liquidity View Columns & Data */}
-              {showProjection && projectionData && projectionData.length > 0 && (
+              {/* Projection Schedule Table — the same 8 columns and figures as
+                  the Liquidity tab. In the Quotation tab it shows a cropped
+                  preview (first, middle and final years); the full table
+                  lives in the Liquidity tab. */}
+              {showProjection && projectionRowsShown.length > 0 && (
                 <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 space-y-3">
                   <div className="flex items-center justify-between border-b-2 border-brand-primary/40 pb-2">
                     <h3 className="text-xs font-black uppercase tracking-wider text-brand-text">
-                      {standardProjectionNum}. Policy Value Projection Trajectory
+                      Policy Value Projection Trajectory
                     </h3>
                     <span className="text-[10px] text-slate-500 font-normal">
                       Illustrative schedule over {input.term} years
                     </span>
                   </div>
+                  {projectionPreview && (
+                    <p className="text-[11px] text-slate-500">Cropped preview — full {input.term}-year table in the Liquidity tab</p>
+                  )}
 
                   <div className="overflow-x-auto border border-[#e5e8df] rounded-xl">
-                    <table className="w-full text-left text-[11px] border-collapse">
+                    <table className="w-full min-w-[720px] text-left text-[11px] border-collapse">
                       <thead>
-                        <tr className="bg-[#f0f1df] text-brand-text font-bold text-[9px] uppercase tracking-wider">
-                          <th className="p-2.5 border-r border-[#e5e8df] text-center">END OF YEAR</th>
-                          <th className="p-2.5 border-r border-[#e5e8df] text-right">BASE PREMIUM</th>
-                          <th className="p-2.5 border-r border-[#e5e8df] text-right">NATURAL DEATH</th>
-                          <th className="p-2.5 border-r border-[#e5e8df] text-right">SURRENDER VALUE</th>
-                          <th className="p-2.5 border-r border-[#e5e8df] text-right">PAID UP VALUE</th>
-                          <th className="p-2.5 text-center">ETI BENEFITS</th>
+                        <tr className="bg-[#f0f1df] text-brand-text font-bold text-[10px] tracking-wider">
+                          <th className="p-2.5 border-r border-[#e5e8df] text-center">End of Year</th>
+                          <th className="p-2.5 border-r border-[#e5e8df] text-right">Premium Paid</th>
+                          <th className="p-2.5 border-r border-[#e5e8df] text-right">Natural Death</th>
+                          <th className="p-2.5 border-r border-[#e5e8df] text-right">Surrender Value</th>
+                          <th className="p-2.5 border-r border-[#e5e8df] text-right">Paid-Up Value</th>
+                          <th className="p-2.5 border-r border-[#e5e8df] text-right">ETI Cover</th>
+                          <th className="p-2.5 border-r border-[#e5e8df] text-right">ETI Cash Back</th>
+                          <th className="p-2.5 text-right">Loan (Max)</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#e5e8df]">
-                        {projectionData.map((row) => (
+                        {projectionRowsShown.map((row) => (
                           <tr key={row.year} className="hover:bg-[#f7f8ef]">
                             <td className="p-2 border-r border-[#e5e8df] text-center font-bold text-slate-700">
                               {row.year}
@@ -1523,22 +1753,14 @@ export default function PlanQuotationModal({
                             <td className="p-2 border-r border-[#e5e8df] text-right font-mono text-slate-700 font-medium">
                               {row.paidUpValue > 0 ? formatCurrency(row.paidUpValue) : '—'}
                             </td>
-                            <td className="p-2 text-center font-mono text-[10px]">
-                              {row.etiDurationStr && row.etiDurationStr !== '—' ? (
-                                <div className="flex flex-col items-center">
-                                  <span className={cn(
-                                    "font-bold",
-                                    row.etiDurationStr.startsWith('-') ? "text-rose-600" : "text-emerald-600"
-                                  )}>
-                                    {row.etiDurationStr}
-                                  </span>
-                                  <span className="text-[8px] text-slate-500 uppercase font-medium">
-                                    Active Death Coverage: {formatCurrency(row.etiCoverage || input.sumAssured)}
-                                  </span>
-                                </div>
-                              ) : (
-                                <span className="text-slate-400">—</span>
-                              )}
+                            <td className="p-2 border-r border-[#e5e8df] text-right font-mono text-brand-text">
+                              {row.etiCoverage > 0 ? formatCurrency(row.etiCoverage) : '—'}
+                            </td>
+                            <td className="p-2 border-r border-[#e5e8df] text-right font-mono text-brand-text">
+                              {row.etiCoverage > 0 ? formatCurrency(row.etiSurplus) : '—'}
+                            </td>
+                            <td className="p-2 text-right font-mono text-brand-text">
+                              {(row.loanValue || 0) > 0 ? formatCurrency(row.loanValue || 0) : '—'}
                             </td>
                           </tr>
                         ))}
@@ -1584,41 +1806,51 @@ export default function PlanQuotationModal({
             </div>
           )}
 
-          {/* Print / download actions — at the very end of the preview, after
-              all content (every layout: standard, SDPP, combo). Buttons and
-              behaviour are unchanged, only the position moved. */}
+          {/* Edit / Share / Download — at the very end of the preview, after
+              all content (every layout: standard, SDPP, combo). */}
           <div className={cn("print:hidden mx-auto w-full", (isComboEnabled || isSDPP) ? "max-w-[800px]" : "")}>
-            <div className="rounded-2xl border border-[#e5e8df] bg-white p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="rounded-2xl border border-[#e5e8df] bg-white p-3 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs text-slate-600" role="status" aria-live="polite">
-                  {isGeneratingPdf ? 'Preparing your personalized A4 quotation…' : 'PDF download includes a clean, print-ready summary, benefit details and available policy projections.'}
-                </p>
+                {isGeneratingPdf && (
+                  <p className="text-xs text-slate-600" role="status" aria-live="polite">Preparing your personalized A4 quotation…</p>
+                )}
+                {shareStatus !== 'idle' && (
+                  <p className="text-xs text-emerald-700 font-bold" role="status" aria-live="polite">{shareStatus === 'shared' ? 'Shared' : 'Link copied'}</p>
+                )}
                 {pdfError && <p role="alert" className="mt-2 text-sm text-red-700">{pdfError} You can retry using Download PDF.</p>}
               </div>
-              <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+              <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-3 flex-shrink-0 w-full sm:w-auto">
                 <button
-                  title="Print quotation" aria-label="Print quotation"
-                  onClick={handlePrint}
-                  className="px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Edit inputs" aria-label="Edit inputs"
+                  onClick={onClose}
+                  className="px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
                 >
-                  <Printer className="w-4 h-4 text-slate-300" />
-                  <span className="hidden sm:inline">Print</span>
+                  <Pencil className="w-4 h-4 hidden sm:block" />
+                  <span>‹ Edit inputs</span>
+                </button>
+                <button
+                  title="Share illustration" aria-label="Share illustration"
+                  onClick={handleShare}
+                  className="px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
+                >
+                  <Share2 className="w-4 h-4 hidden sm:block" />
+                  <span>Share</span>
                 </button>
                 <button
                   title="Download PDF" aria-label={isGeneratingPdf ? "Generating quotation PDF" : "Download PDF"} aria-busy={isGeneratingPdf}
                   onClick={handleDownloadPdf}
                   disabled={isGeneratingPdf}
-                  className="px-4 py-2.5 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-brand-primary/20 transition-all cursor-pointer disabled:opacity-50"
+                  className="px-2.5 sm:px-4 py-2.5 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-lg shadow-brand-primary/20 transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap"
                 >
                   {isGeneratingPdf ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span className="hidden sm:inline">Generating...</span>
+                      <span>Generating...</span>
                     </>
                   ) : (
                     <>
-                      <Download className="w-4 h-4" />
-                      <span className="hidden sm:inline">Download PDF</span>
+                      <Download className="w-4 h-4 hidden sm:block" />
+                      <span>Download PDF</span>
                     </>
                   )}
                 </button>
