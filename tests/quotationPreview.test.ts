@@ -39,7 +39,7 @@ test('mode comparison: selected-mode total matches the quotation model total pai
 });
 
 test('mode comparison: single-premium plans show only the Single row, paid once', () => {
-  for (const product of ['sspe', 'scep_single_2']) {
+  for (const product of ['sspe', 'scep_single_3']) {
     const options = quotationFixture(product, 'Single', 10);
     const rows = modeComparisonRows(options.selectedProduct!, 10, options.selectedProduct!.maturityValue!, options.input.sumAssured, 'Single');
     assert.deepEqual(rows.map(row => row.mode), ['Single']);
@@ -64,12 +64,11 @@ test('stage payouts: S4PP pays 15% + 15% + 15% + 55% in the right policy years a
 
 test('stage payouts: non-stage plans have no stages', () => {
   assert.deepEqual(stagePayouts('endowment', 15, 1000000, 2026), []);
-  assert.deepEqual(stagePayouts('scep_2', 15, 1000000, 2026), []);
+  assert.deepEqual(stagePayouts('scep_3', 15, 1000000, 2026), []);
 });
 
-test('child stipend: parses 1% / 2% / 3% of the sum assured, and only for child plans', () => {
-  assert.deepEqual(scepStipend('scep_1', 1440000), { percent: 0.01, monthly: 14400 });
-  assert.deepEqual(scepStipend('scep_2', 1440000), { percent: 0.02, monthly: 28800 });
+test('child stipend: parses 3% of the sum assured, and only for child plans', () => {
+  assert.deepEqual(scepStipend('scep_3', 1440000), { percent: 0.03, monthly: 43200 });
   assert.deepEqual(scepStipend('scep_single_3', 1440000), { percent: 0.03, monthly: 43200 });
   assert.equal(scepStipend('endowment', 1440000), null);
   assert.equal(scepStipend('sspe', 1440000), null);

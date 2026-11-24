@@ -105,9 +105,9 @@ export function stagePayouts(
 
 /**
  * Monthly education stipend for Child Education plans, parsed from the product
- * id the same way the rest of the app does (1% / 2% / 3% of the sum assured,
- * paid every month until maturity on covered parental death). Returns null for
- * products that carry no stipend.
+ * id the same way the rest of the app does (3% of the sum assured — the only
+ * stipend variant offered — paid every month until maturity on covered
+ * parental death). Returns null for products that carry no stipend.
  */
 export function scepStipend(productId: string, sumAssured: number): { percent: number; monthly: number } | null {
   if (!productId.startsWith('scep')) return null;

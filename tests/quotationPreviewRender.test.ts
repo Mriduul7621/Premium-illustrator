@@ -164,10 +164,10 @@ test('standard preview: S4PP stage payouts render all four stages in the same mo
 });
 
 test('standard preview: Child Education stipend is highlighted and the death story shows all three parts', () => {
-  const options = quotationFixture('scep_2', 'Monthly', 15);
+  const options = quotationFixture('scep_3', 'Monthly', 15);
   const html = renderPreview(options);
   assert.ok(html.includes('Monthly education stipend'));
-  assert.ok(html.includes(formatCurrency(28800)));
+  assert.ok(html.includes(formatCurrency(43200)));
   assert.ok(html.includes('border-[#F37021]'), 'stipend panel carries the orange highlight');
   assert.ok(html.includes('full sum assured again'));
   assert.ok(html.includes('Future premiums are waived'));

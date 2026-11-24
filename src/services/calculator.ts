@@ -1,12 +1,8 @@
 import { 
   MODAL_FACTORS, 
-  SCEP_1_ANNUAL_RATES,
-  SCEP_2_ANNUAL_RATES,
   SCEP_3_ANNUAL_RATES,
   ENDOWMENT_ANNUAL_RATES,
   SPE_MATURITY_TABLE,
-  SCEP_1_SINGLE_RATES,
-  SCEP_2_SINGLE_RATES,
   SCEP_3_SINGLE_RATES
 } from '../data/rates';
 import { CalculationInput, CalculationResult, PlanFrequency, ProjectionRow } from '../data/types';
@@ -49,11 +45,7 @@ export function calculateSAFromPremium(input: CalculationInput, selectedProductI
     { id: 's3pp', name: 'Shanta 3 Stage Plan', rates: S3PP_ANNUAL_RATES },
     { id: 's4pp', name: 'Shanta 4 Stage Plan', rates: S4PP_ANNUAL_RATES },
     { id: 'sspe', name: 'Shanta Single Premium Endowment', rates: SPE_MATURITY_TABLE }, 
-    { id: 'scep_1', name: 'Shanta Child Education Plan (1%)', rates: SCEP_1_ANNUAL_RATES },
-    { id: 'scep_2', name: 'Shanta Child Education Plan (2%)', rates: SCEP_2_ANNUAL_RATES },
     { id: 'scep_3', name: 'Shanta Child Education Plan (3%)', rates: SCEP_3_ANNUAL_RATES },
-    { id: 'scep_single_1', name: 'Shanta Child Education (Single) 1%', rates: SCEP_1_SINGLE_RATES },
-    { id: 'scep_single_2', name: 'Shanta Child Education (Single) 2%', rates: SCEP_2_SINGLE_RATES },
     { id: 'scep_single_3', name: 'Shanta Child Education (Single) 3%', rates: SCEP_3_SINGLE_RATES },
   ];
 
@@ -211,11 +203,7 @@ export function calculatePremiums(input: CalculationInput): (CalculationResult |
     { id: 's3pp', name: 'Shanta 3 Stage Plan', rates: S3PP_ANNUAL_RATES },
     { id: 's4pp', name: 'Shanta 4 Stage Plan', rates: S4PP_ANNUAL_RATES },
     { id: 'sspe', name: 'Shanta Single Premium Endowment', rates: SPE_MATURITY_TABLE }, 
-    { id: 'scep_1', name: 'Shanta Child Education Plan (1%)', rates: SCEP_1_ANNUAL_RATES },
-    { id: 'scep_2', name: 'Shanta Child Education Plan (2%)', rates: SCEP_2_ANNUAL_RATES },
     { id: 'scep_3', name: 'Shanta Child Education Plan (3%)', rates: SCEP_3_ANNUAL_RATES },
-    { id: 'scep_single_1', name: 'Shanta Child Education (Single) 1%', rates: SCEP_1_SINGLE_RATES },
-    { id: 'scep_single_2', name: 'Shanta Child Education (Single) 2%', rates: SCEP_2_SINGLE_RATES },
     { id: 'scep_single_3', name: 'Shanta Child Education (Single) 3%', rates: SCEP_3_SINGLE_RATES },
   ];
 
